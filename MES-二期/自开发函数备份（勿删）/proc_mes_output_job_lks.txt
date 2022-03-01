@@ -1,0 +1,29 @@
+CREATE OR REPLACE FUNCTION "mes"."proc_mes_output_job_lks"()
+  RETURNS "pg_catalog"."int4" AS $BODY$
+	BEGIN
+	-- Routine body goes here...
+	insert into mes_output_job(factory_code,material_code_product,actual_output,product_date,is_valid,operate_user,operate_time)
+	select b.factory_code,
+				a.material_code_product,
+				sum(a.actual_output) as actual_output,
+				b.product_date,
+				'有效' as is_valid,
+				'定时作业' as operate_user,
+				CURRENT_TIMESTAMP(0) as operate_time
+	from mes_process_order a
+	join mes_work_order b
+	on a.work_order_no = b.work_order_no and b.is_valid = '有效'
+	join mdm_material_classification c
+	on c.material_code = a.material_code_product and c.classification_level = 2 and c.is_valid = '有效'
+	join mdm_classification d
+	on d.classification_type = '055' and d.classification_code = c.classification_code and d.is_valid = '有效'
+	where b.product_date = CURRENT_DATE + INTERVAL '-1 day'
+	and a.is_valid = '有效'
+	and a.status_output = '已确认'
+	GROUP BY b.factory_code,
+						a.material_code_product,
+						b.product_date;
+	RETURN 1;
+END$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100

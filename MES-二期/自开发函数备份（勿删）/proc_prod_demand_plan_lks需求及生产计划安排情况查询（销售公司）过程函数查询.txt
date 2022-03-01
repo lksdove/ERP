@@ -1,0 +1,1350 @@
+CREATE OR REPLACE FUNCTION "mes"."proc_prod_demand_plan_lks"("adt_start" timestamp, "adt_end" timestamp, "ai_mid" int4, "as_chandi" varchar, "as_area" varchar, "as_emp" varchar, "as_mtrl_class" varchar, "as_mtrl_type" varchar, "as_request" varchar, "as_prod" varchar, "as_t" varchar)
+  RETURNS SETOF "pg_catalog"."record" AS $BODY$
+--***********************************************************************
+---- 需求及生产计划安排情况查询(全公司)
+--***********************************************************************
+declare rs record ; --结果集
+declare use_dept varchar(10);
+declare adt_today timestamp := CURRENT_DATE;
+declare adt_tmp1 timestamp;
+declare adt_tmp2 timestamp;
+declare as_ok varchar(1);
+declare adt_text varchar(50);
+declare adt_text_o varchar(50);
+declare as_org_type varchar(10);
+declare as_prod_type varchar(10);
+ls_min_functioncode varchar(20);
+ad_old date;
+ad_month_str date;
+ad_month_end date;
+
+begin
+ad_old =  (current_date  - interval '3 month')::date;
+create local TEMPORARY  table t1318_r
+(  
+	area   varchar(40)  null,
+	chandi varchar(40)  null,
+	dept_no varchar(50) null,
+	big_class varchar(40)  null,
+	mtrl_class varchar(40)  null,
+	mtrl_class_code varchar(40) null,
+	mtrl_name varchar(50) null, 
+  deliver_integer decimal(20,2) null,
+	stock_qty decimal(20,2) null,
+	prod_qty decimal(20,2) null,
+	weifa_qty decimal(20,2) null,
+	weifa_qty2 decimal(20,2) null,
+	text varchar(50) null,
+	plan_integer  decimal(20,2) null
+ )ON COMMIT DROP;
+
+
+create local TEMPORARY  table t1318_r2
+(  
+	area   varchar(40)  ,
+	chandi varchar(40)  ,
+	dept_no varchar(50) ,
+	big_class varchar(40)  ,
+	mtrl_class varchar(40)  ,
+	mtrl_class_code varchar(40),
+	if_lihe varchar(10) ,
+	mtrl_name varchar(50) , 
+  deliver_integer decimal(20,2),
+	stock_qty decimal(20,2) ,
+	prod_qty decimal(20,2) ,
+	weifa_qty decimal(20,2) ,
+	weifa_qty2 decimal(20,2) ,
+	text varchar(50) ,
+	plan_integer  decimal(20,2) 
+ )ON COMMIT DROP;
+
+
+ 
+
+ 
+--产品小类和产品对应关系
+create local TEMPORARY table t1318_mtrl
+(
+	mtrl_no varchar(50) null,
+	mtrl_class varchar(40) null,
+	mtrl_class_code varchar(40) null
+)ON COMMIT DROP;
+
+--仓库与产地
+create local TEMPORARY table t1318_dept
+(
+	ware_no varchar(10) null,
+	area   varchar(40)  null,
+	chandi varchar(40)  null,
+	dept_no varchar(50) null
+)ON COMMIT DROP;
+--分公司产地区域关系
+create local TEMPORARY table t1318_com
+(
+	area   varchar(40)  null,
+	chandi varchar(40)  null,
+	dept_no varchar(50) null
+)ON COMMIT DROP;
+--库存
+create local TEMPORARY table t1318_stock
+(
+	area   varchar(40)  null,
+	chandi varchar(40)  null,
+	dept_no varchar(50) null,
+	mtrl_class varchar(40) null,
+	mtrl_class_code varchar(40) null,
+	mtrl_no varchar(50) null, 
+	stock_integer decimal(20,2) null
+)ON COMMIT DROP;
+--分公司下的未发
+create local TEMPORARY table t1318_list
+(
+	area   varchar(40)  null,
+	chandi varchar(40)  null,
+	dept_no varchar(50) null,
+	mtrl_class varchar(40) null,
+	mtrl_class_code varchar(40) null,
+	mtrl_no varchar(50) null, 
+	about_deliver_date timestamp null,
+	plan_integer decimal(20,2)	null
+)ON COMMIT DROP;
+create local TEMPORARY table t1318_deliver
+(
+	ware_no varchar(50) null,
+	mtrl_no varchar(50) null, 
+	deliver_integer decimal(20,2)	
+)ON COMMIT DROP;
+--生产计划
+create local TEMPORARY table t1318_prod
+(
+	area   varchar(40)  null,
+	chandi varchar(40)  null,
+	dept_no varchar(50) null,
+	mtrl_class varchar(40) null,
+	mtrl_class_code varchar(40) null,
+	mtrl_no varchar(50) null, 
+	start_date timestamp null,
+	prod_qty decimal(20,2) null
+)ON COMMIT DROP;
+
+create local TEMPORARY table t1318_ok
+(
+	area   varchar(40)  null,
+	chandi varchar(40)  null,
+	dept_no varchar(50) null,
+	mtrl_class varchar(40) null,
+	mtrl_class_code varchar(40) null,
+	mtrl_no varchar(50) null, 
+	plan_integer decimal(20,2)	null, --需生产量
+	stock_qty decimal(20,2)	null     --库存量
+
+)ON COMMIT DROP;
+create local TEMPORARY table t1318_tmp
+(
+	area   varchar(40)  null,
+	chandi varchar(40)  null,
+	dept_no varchar(50) null,
+	mtrl_class varchar(40) null,
+	mtrl_class_code varchar(40) null,
+	mtrl_no varchar(50) null, 
+	plan_integer decimal(20,2)	null, --需生产量
+	stock_qty decimal(20,2)	null     --库存量
+)ON COMMIT DROP;
+
+--时间段内的生产计划
+create local TEMPORARY table t1318_prod_t
+(
+	area   varchar(40)  null,
+	chandi varchar(40)  null,
+	dept_no varchar(50) null,
+	mtrl_class varchar(40) null,
+	mtrl_class_code varchar(40) null,
+	mtrl_no varchar(50) null, 
+	prod_integer decimal(20,2)	null
+)ON COMMIT DROP;
+
+--时间段内的生产计划
+create local TEMPORARY table t1318_prod_tt
+(
+	area   varchar(40)  null,
+	chandi varchar(40)  null,
+	dept_no varchar(50) null,
+	mtrl_class varchar(40) null,
+	mtrl_class_code varchar(40) null,
+	mtrl_no varchar(50) null, 
+	prod_integer decimal(20,2)	null
+)ON COMMIT DROP;
+
+
+create local TEMPORARY table t1318_a
+(  
+	area   varchar(40)  null,
+	chandi varchar(40)  null,
+	dept_no varchar(50) null,
+	mtrl_class varchar(40) null,
+	mtrl_class_code varchar(40) null,
+	mtrl_name varchar(50) null,
+	text varchar(50) null
+ )ON COMMIT DROP;
+create local TEMPORARY table t1318_b
+(  
+	area   varchar(40)  null,
+	chandi varchar(40)  null,
+	dept_no varchar(50) null,
+	mtrl_class varchar(40) null,
+	mtrl_class_code varchar(40) null,
+	mtrl_name varchar(50) null,
+	text varchar(50) null
+ )ON COMMIT DROP;
+create local TEMPORARY table t1318_over
+(  
+	area   varchar(40)  null,
+	chandi varchar(40)  null,
+	dept_no varchar(50) null,
+	mtrl_class varchar(40) null,
+	mtrl_class_code varchar(40) null,
+	mtrl_name varchar(50) null,
+	text varchar(50) null
+ )ON COMMIT DROP;
+create local TEMPORARY table t1318_data
+(  
+	area   varchar(40)  null,
+	chandi varchar(40)  null,
+	dept_no varchar(50) null,
+	mtrl_class varchar(40)  null,
+	mtrl_class_code varchar(40) null,
+	mtrl_name varchar(50) null,
+	plan_integer  decimal(20,2) null 
+ )ON COMMIT DROP;
+
+
+
+
+
+
+create local TEMPORARY  table t1318_xun
+(  
+	area   varchar(40)  null,
+	chandi varchar(40)  null,
+	dept_no varchar(50) null,
+	mtrl_class varchar(40)  null,
+	mtrl_class_code varchar(40) null,
+	mtrl_name varchar(50) null, 
+	text varchar(50) null,
+	plan_qty decimal(20,2) null
+ )ON COMMIT DROP;
+
+create local TEMPORARY  table t1318_xun_t
+(  
+	area   varchar(40)  null,
+	chandi varchar(40)  null,
+	dept_no varchar(50) null,
+	mtrl_class varchar(40)  null,
+	mtrl_class_code varchar(40) null,
+	mtrl_name varchar(50) null,
+	text varchar(50) null,
+	plan_qty decimal(20,2) 
+ )ON COMMIT DROP;
+
+
+ 
+--旬定义表
+create local TEMPORARY table t1318_date
+(
+ functioncode  varchar(10) null,
+ functionname varchar(50) null, 
+ fromdate timestamp null,
+ todate timestamp null
+)ON COMMIT DROP;
+
+
+insert into t1318_date(functioncode,functionname,fromdate,todate ) 
+select functioncode,functionname,fromdate,todate
+ From xs_jc_order_xun_date
+where p_year = date_part('year',adt_start) and p_month = date_part('month',adt_start) and
+      todate >=adt_start ; 
+
+select min(functioncode)
+into ls_min_functioncode
+from t1318_date;
+
+as_ok ='0';
+adt_tmp1 = adt_start;
+adt_tmp2 = adt_start + (ai_mid ::varchar || ' day') :: interval;
+
+use_dept = 'bm3318';
+
+
+insert into t1318_mtrl
+SELECT
+	e2.material_code,
+	cf2.classification_name AS small_class_name,
+	cf2.classification_code
+FROM
+	mdm_dictionary_item item
+	JOIN mdm_classification cf1 ON cf1.classification_type = item.item_code 
+	AND cf1.classification_level = 1 
+	AND cf1.is_valid = '有效'
+	JOIN mdm_classification cf2 ON cf2.classification_type = item.item_code 
+	AND cf2.classification_level = 2 
+	AND cf2.classification_code_parent = cf1.classification_code 
+	AND cf2.is_valid = '有效'
+	JOIN mdm_material_classification e2 ON e2.is_valid = '有效' 
+	AND e2.classification_level = 2 
+	AND e2.classification_code = cf2.classification_code 
+WHERE
+	item.classification = '类类型' 
+	AND item.item_value = '产品产能分类' 
+	AND item.is_valid = '有效' 
+	AND cf1.classification_code = as_mtrl_class
+	AND cf2.classification_code = as_mtrl_type 
+;
+	
+-- 替换掉
+-- select jc_materialascription.materialid,
+-- 		jc_materialascription.typename  
+--  from jc_materialascription
+-- where  jc_materialascription.typename in(select  jc_classificationdetail.typename from jc_classificationdetail 
+-- 		  where  jc_classificationdetail.typename like as_mtrl_type and
+-- 		 jc_classificationdetail.parenttypename like as_mtrl_class and
+-- 		 jc_classificationdetail.classname = '产品产能分类'  and  
+-- 		 jc_classificationdetail.rank = 2  ) and
+-- 		 jc_materialascription.classname = '产品产能分类'  and  
+-- 		 jc_materialascription.rank = 2 ;	
+	 
+insert into  t1318_dept
+select 
+b.factory_code,
+xs_jc_place_pianqu.pianqu,
+xs_jc_place_pianqu.place_code,
+b.factory_code
+from xs_jc_place_pianqu
+join mdm_factory_production_place b
+on xs_jc_place_pianqu.place_code = b.production_place_code and b.is_valid = '有效'
+join mes_plan_manager m
+on b.factory_code = b.factory_code and m.is_valid = '有效'
+where 
+xs_jc_place_pianqu.pianqu like as_area and 
+xs_jc_place_pianqu.place_code like as_chandi and
+m.plan_manager = as_emp;
+
+--替换掉
+-- insert into  t1318_dept
+-- select distinct jc_higherdepartment.departmentid,
+-- jc_department_area.departmentname,
+-- jc_department.placecode,
+-- jc_higherdepartment.ancientid
+-- from  jc_higherdepartment,
+-- jc_department,
+-- jc_rankdiagram,
+-- jc_department jc_department_area,
+-- jc_classificationdetail
+-- where jc_higherdepartment.ancientid = jc_department.departmentid and	
+-- jc_higherdepartment.ranktype = '行政'  and
+-- jc_higherdepartment.ancientrankid = 20 and
+-- jc_higherdepartment.ancientid = jc_rankdiagram.departmentid and
+-- jc_rankdiagram.ranktype = '生产组织' and
+-- jc_rankdiagram.rankid = 30 and
+-- jc_rankdiagram.parentid = jc_department_area.departmentid and
+-- jc_department_area.departmentis_valid = '1' and
+-- jc_department_area.departmentname like as_area and
+-- jc_department.placecode like as_chandi and
+-- jc_department_area.departmentname = jc_classificationdetail.typename and
+-- jc_classificationdetail.parenttypename like  as_emp  and
+-- jc_classificationdetail.classname = '生产计划调度员' and
+-- jc_classificationdetail.rank = 2;
+
+
+
+insert into  t1318_com
+select distinct t1318_dept.area ,
+		 t1318_dept.chandi ,
+		 t1318_dept.dept_no
+from t1318_dept;
+
+if as_request = '1'  then--表示按排货日期提取
+		insert into   t1318_list(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,about_deliver_date,plan_integer)
+		select t1318_dept.area ,
+				 t1318_dept.chandi ,
+				 t1318_dept.dept_no ,
+				 t1318_mtrl.mtrl_class,
+				 t1318_mtrl.mtrl_class_code,
+				 xs_yw_sale_order_info.mtrl_no,	
+				 xs_yw_sale_order_info.about_deliver_date,
+				 round(sum(coalesce(xs_yw_sale_order_info.plan_integer,0)),2)
+		 from xs_yw_sale_order_info ,
+				t1318_mtrl,
+				t1318_dept 
+		where  xs_yw_sale_order_info.mtrl_no = t1318_mtrl.mtrl_no  and
+				 xs_yw_sale_order_info.factory_code = t1318_dept.ware_no  and
+				 xs_yw_sale_order_info.about_deliver_date < adt_end  and
+				 xs_yw_sale_order_info.about_deliver_date >= ad_old and
+				 xs_yw_sale_order_info.plan_status in ('调度','确认','打印出库单')       
+		group by t1318_dept.area ,
+					t1318_dept.chandi ,
+					t1318_dept.dept_no ,
+					t1318_mtrl.mtrl_class,
+					t1318_mtrl.mtrl_class_code,
+					xs_yw_sale_order_info.about_deliver_date,
+					xs_yw_sale_order_info.mtrl_no;
+		
+		insert into   t1318_list(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,about_deliver_date,plan_integer)
+		select t1318_dept.area ,
+				 t1318_dept.chandi ,
+				 t1318_dept.dept_no ,
+				 t1318_mtrl.mtrl_class,
+				 t1318_mtrl.mtrl_class_code,
+				 xs_yw_yk_order_info.mtrl_no,	
+				 xs_yw_yk_order_info.about_deliver_date,
+				 round(sum(coalesce(xs_yw_yk_order_info.plan_integer,0)),2)
+		 from xs_yw_yk_order_info ,
+				t1318_mtrl,
+				t1318_dept 
+		where  xs_yw_yk_order_info.mtrl_no = t1318_mtrl.mtrl_no  and
+				 xs_yw_yk_order_info.factory_code = t1318_dept.ware_no  and
+				 xs_yw_yk_order_info.about_deliver_date < adt_end   and
+				 xs_yw_yk_order_info.about_deliver_date >= ad_old and
+				 xs_yw_yk_order_info.plan_status in ('调度','确认','打印出库单')    
+		group by t1318_dept.area ,
+					t1318_dept.chandi ,
+					t1318_dept.dept_no ,
+					t1318_mtrl.mtrl_class,
+					t1318_mtrl.mtrl_class_code,
+					xs_yw_yk_order_info.about_deliver_date,
+					xs_yw_yk_order_info.mtrl_no;
+end if;
+
+if as_request = '2' then -- 表示按客户指定发货日期
+		-- 取排货日期在查询日期范围内的数据
+		insert into   t1318_list(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,about_deliver_date,plan_integer)
+		select t1318_dept.area ,
+				 t1318_dept.chandi ,
+				 t1318_dept.dept_no ,
+				 t1318_mtrl.mtrl_class,
+				 t1318_mtrl.mtrl_class_code,
+				 xs_yw_sale_order_info.mtrl_no,	
+				 case when xs_yw_sale_order_info.about_deliver_date < xs_yw_sale_order_info.request_deliver_date then				    
+						xs_yw_sale_order_info.about_deliver_date
+				 else xs_yw_sale_order_info.request_deliver_date
+				 end,
+				 round(sum(coalesce(xs_yw_sale_order_info.plan_integer,0)),2)
+		 from xs_yw_sale_order_info ,
+				t1318_mtrl,
+				t1318_dept 
+		where  xs_yw_sale_order_info.mtrl_no = t1318_mtrl.mtrl_no  and
+				 xs_yw_sale_order_info.factory_code = t1318_dept.ware_no  and
+				 xs_yw_sale_order_info.about_deliver_date < adt_end  and
+				xs_yw_sale_order_info.about_deliver_date >= ad_old and
+				 xs_yw_sale_order_info.plan_status in ('调度','确认','打印出库单')    
+		group by t1318_dept.area ,
+					t1318_dept.chandi ,
+					t1318_dept.dept_no ,
+					t1318_mtrl.mtrl_class,
+					t1318_mtrl.mtrl_class_code,
+					 case when xs_yw_sale_order_info.about_deliver_date < xs_yw_sale_order_info.request_deliver_date then				    
+						xs_yw_sale_order_info.about_deliver_date
+					 else xs_yw_sale_order_info.request_deliver_date
+					 end,
+					xs_yw_sale_order_info.mtrl_no;
+raise notice '1.0 %',clock_timestamp();
+		insert into   t1318_list(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,about_deliver_date,plan_integer)
+		select t1318_dept.area ,
+				 t1318_dept.chandi ,
+				 t1318_dept.dept_no ,
+				 t1318_mtrl.mtrl_class,
+				 t1318_mtrl.mtrl_class_code,
+				 xs_yw_yk_order_info.mtrl_no,	
+				  case when xs_yw_yk_order_info.about_deliver_date < xs_yw_yk_order_info.request_deliver_date then				    
+						xs_yw_yk_order_info.about_deliver_date
+				 else xs_yw_yk_order_info.request_deliver_date
+				 end,
+				 round(sum(coalesce(xs_yw_yk_order_info.plan_integer,0)),2)
+		 from xs_yw_yk_order_info ,
+				t1318_mtrl,
+				t1318_dept 
+		where  xs_yw_yk_order_info.mtrl_no = t1318_mtrl.mtrl_no  and
+				 xs_yw_yk_order_info.factory_code = t1318_dept.ware_no  and
+				 xs_yw_yk_order_info.about_deliver_date < adt_end   and
+				 xs_yw_yk_order_info.about_deliver_date >= ad_old and
+				 xs_yw_yk_order_info.plan_status in ('调度','确认','打印出库单')   
+		group by t1318_dept.area ,
+					t1318_dept.chandi ,
+					t1318_dept.dept_no ,
+					t1318_mtrl.mtrl_class,
+					t1318_mtrl.mtrl_class_code,
+					 case when xs_yw_yk_order_info.about_deliver_date < xs_yw_yk_order_info.request_deliver_date then				    
+						xs_yw_yk_order_info.about_deliver_date
+					 else xs_yw_yk_order_info.request_deliver_date
+					 end,
+					xs_yw_yk_order_info.mtrl_no;
+raise notice '1.1 %',clock_timestamp();
+		-- 取排货日期大于查询日期但是客户指定发货日期小于查询日期的数据
+		insert into   t1318_list(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,about_deliver_date,plan_integer)
+		select t1318_dept.area ,
+				 t1318_dept.chandi ,
+				 t1318_dept.dept_no ,
+				 t1318_mtrl.mtrl_class,
+				 t1318_mtrl.mtrl_class_code,
+				 xs_yw_sale_order_info.mtrl_no,	
+				 xs_yw_sale_order_info.request_deliver_date,
+				 round(sum(coalesce(xs_yw_sale_order_info.plan_integer,0)),2)
+		 from xs_yw_sale_order_info ,
+				t1318_mtrl,
+				t1318_dept 
+		where  xs_yw_sale_order_info.mtrl_no = t1318_mtrl.mtrl_no  and
+				 xs_yw_sale_order_info.factory_code = t1318_dept.ware_no  and
+				 xs_yw_sale_order_info.about_deliver_date >= adt_end  and
+				 xs_yw_sale_order_info.request_deliver_date < adt_end and
+				 xs_yw_sale_order_info.about_deliver_date >= ad_old and
+				 xs_yw_sale_order_info.plan_status in ('调度','确认','打印出库单')     
+		group by t1318_dept.area ,
+					t1318_dept.chandi ,
+					t1318_dept.dept_no ,
+					t1318_mtrl.mtrl_class,
+					t1318_mtrl.mtrl_class_code,
+					xs_yw_sale_order_info.mtrl_no,
+					xs_yw_sale_order_info.request_deliver_date;
+raise notice '1.3 %',clock_timestamp();
+		insert into   t1318_list(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,about_deliver_date,plan_integer)
+		select t1318_dept.area ,
+				 t1318_dept.chandi ,
+				 t1318_dept.dept_no ,
+				 t1318_mtrl.mtrl_class,
+				 t1318_mtrl.mtrl_class_code,
+				 xs_yw_yk_order_info.mtrl_no,	
+				 xs_yw_yk_order_info.request_deliver_date,
+				 round(sum(coalesce(xs_yw_yk_order_info.plan_integer,0)),2)
+		 from xs_yw_yk_order_info ,
+				t1318_mtrl,
+				t1318_dept 
+		where  xs_yw_yk_order_info.mtrl_no = t1318_mtrl.mtrl_no  and
+				 xs_yw_yk_order_info.factory_code = t1318_dept.ware_no  and
+				 xs_yw_yk_order_info.about_deliver_date >= adt_end   and
+				 xs_yw_yk_order_info.request_deliver_date < adt_end   and
+				 xs_yw_yk_order_info.about_deliver_date >= ad_old and
+				 xs_yw_yk_order_info.plan_status in ('调度','确认','打印出库单')     
+		group by t1318_dept.area ,
+					t1318_dept.chandi ,
+					t1318_dept.dept_no ,
+					t1318_mtrl.mtrl_class,
+					t1318_mtrl.mtrl_class_code,
+					xs_yw_yk_order_info.request_deliver_date,
+					xs_yw_yk_order_info.mtrl_no;
+raise notice '1.4 %',clock_timestamp();
+end if;
+
+raise notice  '库位开始计算';
+--库存
+insert into   t1318_stock(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,stock_integer)
+select t1318_com.area ,
+		 t1318_com.chandi ,
+		 t1318_com.dept_no ,
+		 t1318_mtrl.mtrl_class,
+		 t1318_mtrl.mtrl_class_code,
+		 wms_matnr_stock.matnr,  
+		 sum(coalesce(wms_matnr_stock.stock_unlimit ,0)) as stock_amount
+from wms_matnr_stock,   
+	  t1318_mtrl,
+	  t1318_com
+where  wms_matnr_stock.matnr = t1318_mtrl.mtrl_no  and
+		 wms_matnr_stock.factory = t1318_com.dept_no and
+		 wms_matnr_stock.stock_unlimit <> 0
+group  by t1318_com.area ,
+			 t1318_com.chandi ,
+			 t1318_com.dept_no ,
+			 t1318_mtrl.mtrl_class,
+			 t1318_mtrl.mtrl_class_code,
+			wms_matnr_stock.matnr;
+raise notice  '库位结束计算';
+--替换掉			
+-- select t1318_com.area ,
+-- 		 t1318_com.chandi ,
+-- 		 t1318_com.dept_no ,
+-- 		 t1318_mtrl.mtrl_class,
+-- 		 cg_yw_stock.mtrl_no,  
+-- 		 sum(coalesce(cg_yw_stock.stock_amount ,0))
+-- from cg_yw_stock,   
+-- 	  t1318_mtrl,
+-- 	  t1318_com
+-- where  cg_yw_stock.mtrl_no = t1318_mtrl.mtrl_no  and
+-- 		 cg_yw_stock.plant_no = t1318_com.dept_no and
+-- 		 cg_yw_stock.stock_amount <> 0
+-- group  by t1318_com.area ,
+-- 			 t1318_com.chandi ,
+-- 			 t1318_com.dept_no ,
+-- 			 t1318_mtrl.mtrl_class,
+-- 			 cg_yw_stock.mtrl_no;	 
+
+--生产计划
+insert into   t1318_prod(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,start_date,prod_qty)
+select 
+	t1318_com.area,
+	t1318_com.chandi,
+	t1318_com.dept_no,
+	t1318_mtrl.mtrl_class,
+	t1318_mtrl.mtrl_class_code,
+	plan.material_code_product,
+	plan.product_date,
+	sum(case when po.id is null then plan.planned_output 
+	when po.status_output = '已确认' then 0
+	else po.planned_output end) as plan_amount
+from mes_daily_plan plan
+join t1318_mtrl 
+on plan.material_code_product = t1318_mtrl.mtrl_no 
+join t1318_com
+on plan.factory_code = t1318_com.dept_no 
+left join mes_process_order po
+on po.daily_plan_no = plan.daily_plan_no and po.material_code_product = plan.material_code_product and po.is_valid = '有效'
+
+where plan.is_valid = '有效'
+	AND plan.product_date >= adt_today 
+	AND plan.product_date < adt_end 
+GROUP BY
+	t1318_com.area,
+	t1318_com.chandi,
+	t1318_com.dept_no,
+	t1318_mtrl.mtrl_class,
+	t1318_mtrl.mtrl_class_code,
+	plan.material_code_product,
+	plan.product_date;
+	
+--替换
+-- select t1318_com.area ,
+-- 		 t1318_com.chandi ,
+-- 		 t1318_com.dept_no ,
+-- 		 t1318_mtrl.mtrl_class, 
+-- 		 sc_yw_product_plan.mtrl_no,
+-- 		 sc_yw_product_plan.begin_date,
+--        sum(coalesce(sc_yw_product_plan.firm_amount1,0) - coalesce(sc_yw_product_plan.in_amount,0))
+-- from   sc_yw_product_plan  ,
+-- 		 t1318_mtrl,
+-- 		 t1318_com 
+-- where  sc_yw_product_plan.mtrl_no = t1318_mtrl.mtrl_no  and
+-- 		 sc_yw_product_plan.prod_org = t1318_com.dept_no and
+-- 		 sc_yw_product_plan.begin_date >= adt_today  and
+-- 		 sc_yw_product_plan.begin_date < adt_end and
+-- 		 sc_yw_product_plan.status = '审核' and
+-- 		sc_yw_product_plan.plan_type in ('50','70') and
+-- 		sc_yw_product_plan.prod_type = '正常' and
+-- 		sc_yw_product_plan.org_type = '生产组织'
+-- group by  t1318_com.area ,
+-- 			 t1318_com.chandi ,
+-- 			 t1318_com.dept_no ,
+-- 			 t1318_mtrl.mtrl_class, 
+-- 			 sc_yw_product_plan.mtrl_no,
+-- 			 sc_yw_product_plan.begin_date;
+
+
+--需生产量 = 未发 -  上一阶段的库存量 - 上阶段的生产计划
+--库存量=  本阶段的计划量 - 需生产量
+
+while (adt_tmp1 < adt_end)
+loop
+	--日期大于结束日期时等于结束日期
+	if adt_tmp2 > adt_end then
+	
+		adt_tmp2 = adt_end;
+	 end if;
+	 
+ 	 adt_text = substring(adt_tmp1::varchar(10) from 6 for 5) || '-' || substring((adt_tmp2 + interval '-1 day')::varchar(10) from 6 for 5);
+ 	 
+	truncate table t1318_ok;
+	
+	insert into t1318_ok(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,plan_integer)
+		select t1318_tmp.area,
+				 t1318_tmp.chandi,
+				 t1318_tmp.dept_no,
+				 t1318_tmp.mtrl_class,
+				 t1318_tmp.mtrl_class_code,
+				 t1318_tmp.mtrl_no,
+			    -t1318_tmp.stock_qty
+	  from t1318_tmp
+	  where coalesce(t1318_tmp.stock_qty,0) <> 0;
+
+    --第一个时间间隔的需生产量为截止该时间段末的未发销售订单 + 未发移库单 - 当前库存 - 当前日期到开始日期的剩余生产计划。
+	 if as_ok ='0' then
+		as_ok = '1';
+		
+		insert into t1318_ok(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,plan_integer)
+		select t1318_list.area ,
+				 t1318_list.chandi ,
+				 t1318_list.dept_no ,
+				 t1318_list.mtrl_class,
+				 t1318_list.mtrl_class_code,
+				 t1318_list.mtrl_no,	
+				 round(sum(coalesce(t1318_list.plan_integer,0)),2)
+		 from t1318_list 
+		where  t1318_list.about_deliver_date < adt_tmp2 
+		group by t1318_list.area ,
+					t1318_list.chandi ,
+					t1318_list.dept_no ,
+					t1318_list.mtrl_class,
+					t1318_list.mtrl_class_code,
+					t1318_list.mtrl_no;
+		
+
+		--库存
+		insert into t1318_ok(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,plan_integer)
+		select t1318_stock.area ,
+				 t1318_stock.chandi ,
+				 t1318_stock.dept_no ,
+				 t1318_stock.mtrl_class,
+				 t1318_stock.mtrl_class_code,
+				 t1318_stock.mtrl_no,  
+				 - t1318_stock.stock_integer
+		from t1318_stock;
+
+		--剩余生产计划
+		insert into  t1318_ok(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,plan_integer)
+		select t1318_prod.area ,
+				 t1318_prod.chandi ,
+				 t1318_prod.dept_no ,
+				 t1318_prod.mtrl_class, 
+				 t1318_prod.mtrl_class_code, 
+				 t1318_prod.mtrl_no,
+				 - sum(coalesce(t1318_prod.prod_qty,0))
+		from   t1318_prod
+		where   t1318_prod.start_date >= adt_today  and
+				  t1318_prod.start_date < adt_tmp1
+		group by  t1318_prod.area ,
+					 t1318_prod.chandi ,
+					 t1318_prod.dept_no ,
+					 t1318_prod.mtrl_class, 
+					 t1318_prod.mtrl_class_code, 
+					 t1318_prod.mtrl_no;
+
+		--剩余生产计划  本阶段的生产计划
+		insert into t1318_ok(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,stock_qty)
+		select t1318_prod.area ,
+				 t1318_prod.chandi ,
+				 t1318_prod.dept_no ,
+				 t1318_prod.mtrl_class, 
+				 t1318_prod.mtrl_class_code, 
+				 t1318_prod.mtrl_no,
+				 sum(coalesce(t1318_prod.prod_qty,0))
+		from   t1318_prod
+		where   t1318_prod.start_date >= adt_tmp1  and
+				  t1318_prod.start_date < adt_tmp2
+		group by  t1318_prod.area ,
+					 t1318_prod.chandi ,
+					 t1318_prod.dept_no ,
+					 t1318_prod.mtrl_class, 
+					 t1318_prod.mtrl_class_code, 
+					 t1318_prod.mtrl_no;
+
+		truncate table t1318_tmp;
+		
+		insert into t1318_tmp
+		select t1318_ok.area ,
+				 t1318_ok.chandi ,
+				 t1318_ok.dept_no ,
+				 t1318_ok.mtrl_class, 
+				 t1318_ok.mtrl_class_code, 
+				 t1318_ok.mtrl_no,
+				 round(sum(coalesce(t1318_ok.plan_integer,0)),2),
+				 round(sum(coalesce(t1318_ok.stock_qty,0)),2)
+		from   t1318_ok
+		group by  t1318_ok.area ,
+					 t1318_ok.chandi ,
+					 t1318_ok.dept_no ,
+					 t1318_ok.mtrl_class, 
+					 t1318_ok.mtrl_class_code, 
+					 t1318_ok.mtrl_no;	
+
+		update t1318_tmp
+		set stock_qty = coalesce(stock_qty,0) - coalesce(plan_integer,0);
+
+		insert into t1318_r(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_name,text,plan_integer)
+			select t1318_tmp.area,
+				    t1318_tmp.chandi,
+				    t1318_tmp.dept_no,
+				    t1318_tmp.mtrl_class,
+				    t1318_tmp.mtrl_class_code,
+				    t1318_tmp.mtrl_no,
+					 adt_text || '需生产量',
+				    t1318_tmp.plan_integer
+		  from t1318_tmp;			
+
+		insert into t1318_r(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_name,text,plan_integer)
+			select t1318_prod.area ,
+					 t1318_prod.chandi ,
+					 t1318_prod.dept_no ,
+					 t1318_prod.mtrl_class, 
+					 t1318_prod.mtrl_class_code, 
+					 t1318_prod.mtrl_no,
+					 adt_text || '生产计划',
+      			 sum(coalesce(t1318_prod.prod_qty,0))
+			from   t1318_prod
+			where   t1318_prod.start_date >= adt_tmp1  and
+					  t1318_prod.start_date < adt_tmp2 
+			group by  t1318_prod.area ,
+						 t1318_prod.chandi ,
+						 t1318_prod.dept_no ,
+						 t1318_prod.mtrl_class, 
+						 t1318_prod.mtrl_class_code, 
+						 t1318_prod.mtrl_no;
+						 
+	 else
+   --下一间隔的需求量需要减去该库存，如果需求量还小于0，则要在在下一个时间段需求量中去减该值，以此类推。
+		insert into t1318_ok(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,plan_integer)
+		select t1318_list.area ,
+				 t1318_list.chandi ,
+				 t1318_list.dept_no ,
+				 t1318_list.mtrl_class,
+				 t1318_list.mtrl_class_code,
+				 t1318_list.mtrl_no,	
+				 round(sum(coalesce(t1318_list.plan_integer,0)),2)
+		 from t1318_list
+		where  t1318_list.about_deliver_date >= adt_tmp1 and
+				 t1318_list.about_deliver_date < adt_tmp2    
+		group by t1318_list.area ,
+					t1318_list.chandi ,
+					t1318_list.dept_no ,
+					t1318_list.mtrl_class,
+					t1318_list.mtrl_class_code,
+					t1318_list.mtrl_no;
+
+		truncate table t1318_prod_t;
+			
+		insert into t1318_prod_t
+		select t1318_prod.area ,
+		t1318_prod.chandi ,
+		t1318_prod.dept_no ,
+		t1318_prod.mtrl_class, 
+		t1318_prod.mtrl_class_code, 
+		t1318_prod.mtrl_no,
+		sum(coalesce(t1318_prod.prod_qty,0))
+		from   t1318_prod
+		where   t1318_prod.start_date >= adt_tmp1  and
+		t1318_prod.start_date < adt_tmp2 
+		group by  t1318_prod.area ,
+		t1318_prod.chandi ,
+		t1318_prod.dept_no ,
+		t1318_prod.mtrl_class, 
+		t1318_prod.mtrl_class_code, 
+		t1318_prod.mtrl_no;
+
+
+		insert into t1318_ok(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,stock_qty)
+		select t1318_prod_t.area ,
+				 t1318_prod_t.chandi ,
+				 t1318_prod_t.dept_no ,
+				 t1318_prod_t.mtrl_class, 
+				 t1318_prod_t.mtrl_class_code, 
+				 t1318_prod_t.mtrl_no,
+				 t1318_prod_t.prod_integer    			 
+		from   t1318_prod_t;
+
+
+		truncate table t1318_tmp;
+		
+		insert into t1318_tmp(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,plan_integer,stock_qty)
+		select t1318_ok.area ,
+				 t1318_ok.chandi ,
+				 t1318_ok.dept_no ,
+				 t1318_ok.mtrl_class, 
+				 t1318_ok.mtrl_class_code, 
+				 t1318_ok.mtrl_no,
+				 round(sum(coalesce(t1318_ok.plan_integer,0)),2),
+				 round(sum(coalesce(t1318_ok.stock_qty,0)),2)
+		from   t1318_ok
+		group by  t1318_ok.area ,
+					 t1318_ok.chandi ,
+					 t1318_ok.dept_no ,
+					 t1318_ok.mtrl_class, 
+					 t1318_ok.mtrl_class_code, 
+					 t1318_ok.mtrl_no;	
+
+		update t1318_tmp
+		set stock_qty = coalesce(stock_qty,0) - coalesce(plan_integer,0);
+
+		insert into t1318_r(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_name,text,plan_integer)
+			select t1318_tmp.area,
+				    t1318_tmp.chandi,
+				    t1318_tmp.dept_no,
+				    t1318_tmp.mtrl_class,
+				    t1318_tmp.mtrl_class_code,
+				    t1318_tmp.mtrl_no,
+					 adt_text || '需生产量',
+				    t1318_tmp.plan_integer
+		  from t1318_tmp;		
+
+		insert into t1318_r(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_name,text,plan_integer)
+			select t1318_prod_t.area ,
+					 t1318_prod_t.chandi ,
+					 t1318_prod_t.dept_no ,
+					 t1318_prod_t.mtrl_class, 
+					 t1318_prod_t.mtrl_class_code, 
+					 t1318_prod_t.mtrl_no,
+					 adt_text || '生产计划',
+					   t1318_prod_t.prod_integer    			 
+			from   t1318_prod_t;
+ 
+	 end if;
+	adt_tmp1 =  adt_tmp1 + (ai_mid ::varchar || ' day') :: interval;
+	adt_tmp2 = adt_tmp2 + (ai_mid ::varchar || ' day') :: interval;	
+end loop;
+
+
+--对上次的数据补充完整
+--补齐数据，每个阶段都有两个数据
+ 
+ insert into t1318_a
+	select t1318_r.area ,
+			 t1318_r.chandi ,
+			 t1318_r.dept_no ,
+			 t1318_r.mtrl_class, 
+			 t1318_r.mtrl_class_code, 
+			 t1318_r.mtrl_name,
+			 substring(t1318_r.text from 1 for 11)   			 
+	from   t1318_r
+	where t1318_r.text like '%需生产量';
+
+ insert into t1318_b
+	select t1318_r.area ,
+			 t1318_r.chandi ,
+			 t1318_r.dept_no ,
+			 t1318_r.mtrl_class, 
+			 t1318_r.mtrl_class_code, 
+			 t1318_r.mtrl_name,
+			 substring(t1318_r.text from 1 for 11)   			 
+	from   t1318_r
+	where t1318_r.text like '%生产计划';
+
+
+
+insert into t1318_over
+select  t1318_a.area,
+		  t1318_a.chandi,
+		  t1318_a.dept_no,
+		  t1318_a.mtrl_class,
+		  t1318_a.mtrl_class_code,
+		  t1318_a.mtrl_name,
+		  t1318_a.text
+from t1318_a ,
+	  t1318_b
+where 
+		--t1318_a.area = t1318_b.area and
+		--t1318_a.chandi = t1318_b.chandi and
+		t1318_a.dept_no = t1318_b.dept_no and
+		--t1318_a.mtrl_class = t1318_b.mtrl_class and
+		t1318_a.mtrl_name = t1318_b.mtrl_name  and
+		t1318_a.text = t1318_b.text;
+
+
+delete from t1318_a
+using t1318_over
+where 
+        --t1318_a.area = t1318_over.area and
+	--t1318_a.chandi = t1318_over.chandi and
+	t1318_a.dept_no = t1318_over.dept_no and
+	--t1318_a.mtrl_class = t1318_over.mtrl_class and
+	t1318_a.mtrl_name = t1318_over.mtrl_name and
+	   t1318_a.text = t1318_over.text;   
+
+delete from t1318_b
+using t1318_over
+where 
+        --t1318_b.area = t1318_over.area and
+	--t1318_b.chandi = t1318_over.chandi and
+	t1318_b.dept_no = t1318_over.dept_no and
+	--t1318_b.mtrl_class = t1318_over.mtrl_class and
+	t1318_b.mtrl_name = t1318_over.mtrl_name and
+	   t1318_b.text = t1318_over.text;  
+
+ insert into t1318_r(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_name,text,plan_integer)
+	select t1318_a.area,
+			 t1318_a.chandi,
+			 t1318_a.dept_no,
+			 t1318_a.mtrl_class,
+			 t1318_a.mtrl_class_code,
+			 t1318_a.mtrl_name,
+			 t1318_a.text || '生产计划',
+			 null
+  from t1318_a;	
+
+	insert into t1318_r(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_name,text,plan_integer)
+	select t1318_b.area ,
+			 t1318_b.chandi ,
+			 t1318_b.dept_no ,
+			 t1318_b.mtrl_class, 
+			 t1318_b.mtrl_class_code, 
+			 t1318_b.mtrl_name,
+			 t1318_b.text || '需生产量',
+			 null	 
+	from   t1318_b;
+
+
+if as_prod = '0' then
+	delete from 	   t1318_r
+	where t1318_r.text like '%需生产量';
+end if ;
+
+ truncate table t1318_data;
+
+ insert into t1318_data
+	select t1318_r.area,
+			 t1318_r.chandi,
+			 t1318_r.dept_no,
+			 t1318_r.mtrl_class,
+			 t1318_r.mtrl_class_code,
+			 t1318_r.mtrl_name,
+			 round(sum(coalesce(t1318_r.plan_integer,0)),2)
+  from t1318_r		
+  where text like '%生产计划'
+group by t1318_r.area,
+			 t1318_r.chandi,
+			 t1318_r.dept_no,
+			 t1318_r.mtrl_class,
+			 t1318_r.mtrl_class_code,
+			 t1318_r.mtrl_name;
+
+	insert into t1318_r(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_name,text,plan_integer)
+	select t1318_data.area,
+			 t1318_data.chandi,
+			 t1318_data.dept_no,
+			 t1318_data.mtrl_class,
+			 t1318_data.mtrl_class_code,
+			 t1318_data.mtrl_name,
+			 '合计生产计划',
+			 t1318_data.plan_integer
+  from t1318_data;	
+
+
+--旬未发和余缺
+
+	insert into t1318_xun(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_name,text,plan_qty)
+	select  t1318_prod.area ,
+		t1318_prod.chandi ,
+		t1318_prod.dept_no ,
+		t1318_prod.mtrl_class, 
+		t1318_prod.mtrl_class_code, 
+		t1318_prod.mtrl_no,
+		t1318_date.functionname || '余缺',
+		sum(coalesce(t1318_prod.prod_qty,0))
+	from   t1318_prod,t1318_date
+	where   --t1318_prod.start_date >= t1318_date.fromdate  and
+		t1318_prod.start_date < t1318_date.todate 
+	group by  	t1318_prod.area ,
+			t1318_prod.chandi ,
+			t1318_prod.dept_no ,
+			t1318_prod.mtrl_class,   
+			t1318_prod.mtrl_class_code,   
+			t1318_prod.mtrl_no,
+			t1318_date.functionname;
+
+	insert into t1318_xun(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_name,text,plan_qty)
+		select 	 t1318_stock.area ,
+			 t1318_stock.chandi ,
+			 t1318_stock.dept_no ,
+			 t1318_stock.mtrl_class,
+			 t1318_stock.mtrl_class_code,
+			 t1318_stock.mtrl_no,	
+			 t1318_date.functionname ||'余缺',
+			 round(coalesce(t1318_stock.stock_integer,0),2)
+		 from t1318_date,t1318_stock;
+		 
+
+	insert into t1318_xun(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_name,text,plan_qty)
+		select 	 t1318_list.area ,
+			 t1318_list.chandi ,
+			 t1318_list.dept_no ,
+			 t1318_list.mtrl_class,
+			 t1318_list.mtrl_class_code,
+			 t1318_list.mtrl_no,	
+			 t1318_date.functionname ||'余缺',
+			- round(sum(coalesce(t1318_list.plan_integer,0)),2)
+		 from t1318_list,t1318_date
+		where  --t1318_list.about_deliver_date >= t1318_date.fromdate  and 
+		       t1318_list.about_deliver_date <= t1318_date.todate     
+		group by t1318_list.area ,
+			t1318_list.chandi ,
+			t1318_list.dept_no ,
+			t1318_list.mtrl_class,
+			t1318_list.mtrl_class_code,
+			t1318_list.mtrl_no,
+			t1318_date.functionname;
+
+		
+	insert into t1318_xun(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_name,text,plan_qty)
+		select 	 t1318_list.area ,
+			 t1318_list.chandi ,
+			 t1318_list.dept_no ,
+			 t1318_list.mtrl_class,
+			 t1318_list.mtrl_class_code,
+			 t1318_list.mtrl_no,	
+			 t1318_date.functionname ||'以前需求',
+			 round(sum(coalesce(t1318_list.plan_integer,0)),2)
+		 from t1318_list,t1318_date
+		where  t1318_list.about_deliver_date < t1318_date.fromdate  and 
+		       t1318_date.functioncode =ls_min_functioncode
+		group by t1318_list.area ,
+			t1318_list.chandi ,
+			t1318_list.dept_no ,
+			t1318_list.mtrl_class,
+			t1318_list.mtrl_class_code,
+			t1318_list.mtrl_no,
+			t1318_date.functionname;
+
+	insert into t1318_xun(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_name,text,plan_qty)
+		select 	 t1318_list.area ,
+			 t1318_list.chandi ,
+			 t1318_list.dept_no ,
+			 t1318_list.mtrl_class,
+			 t1318_list.mtrl_class_code,
+			 t1318_list.mtrl_no,	
+			 t1318_date.functionname ||'需求',
+			 round(sum(coalesce(t1318_list.plan_integer,0)),2)
+		 from t1318_list,t1318_date
+		where  t1318_list.about_deliver_date >= t1318_date.fromdate  and 
+		       t1318_list.about_deliver_date <= t1318_date.todate     
+		group by t1318_list.area ,
+			t1318_list.chandi ,
+			t1318_list.dept_no ,
+			t1318_list.mtrl_class,
+			t1318_list.mtrl_class_code,
+			t1318_list.mtrl_no,
+			t1318_date.functionname;
+
+
+
+
+
+
+	 insert into t1318_r(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_name,text,plan_integer)
+	 select area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_name,text,sum(plan_qty)
+	 from t1318_xun
+	 group by  area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_name,text;
+
+	
+
+
+
+truncate table t1318_prod_t;
+
+insert into t1318_prod_t(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,prod_integer)
+select t1318_prod.area ,
+		 t1318_prod.chandi ,
+		 t1318_prod.dept_no ,
+		 t1318_prod.mtrl_class, 
+		 t1318_prod.mtrl_class_code, 
+		 t1318_prod.mtrl_no,
+		 sum(coalesce(t1318_prod.prod_qty,0))
+from   t1318_prod
+where   t1318_prod.start_date >= adt_today  and
+		  t1318_prod.start_date < adt_start
+group by  t1318_prod.area ,
+			 t1318_prod.chandi ,
+			 t1318_prod.dept_no ,
+			 t1318_prod.mtrl_class, 
+			 t1318_prod.mtrl_class_code, 
+			 t1318_prod.mtrl_no;
+
+update t1318_r 
+set   prod_qty = t1318_prod_t.prod_integer 
+from t1318_prod_t
+where t1318_r.dept_no = t1318_prod_t.dept_no and
+		t1318_r.mtrl_name = t1318_prod_t.mtrl_no;
+
+truncate table t1318_prod_t;
+
+insert into t1318_prod_t(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,prod_integer)
+select t1318_list.area ,
+		 t1318_list.chandi ,
+		 t1318_list.dept_no ,
+		 t1318_list.mtrl_class,
+		 t1318_list.mtrl_class_code,
+		 t1318_list.mtrl_no,	
+		 round(sum(coalesce(t1318_list.plan_integer,0)),2)
+ from t1318_list
+group by t1318_list.area ,
+			t1318_list.chandi ,
+			t1318_list.dept_no ,
+			t1318_list.mtrl_class,
+			t1318_list.mtrl_class_code,
+			t1318_list.mtrl_no;
+
+update t1318_r 
+set   weifa_qty2 = t1318_prod_t.prod_integer 
+from t1318_prod_t
+where t1318_r.dept_no = t1318_prod_t.dept_no and
+		t1318_r.mtrl_name = t1318_prod_t.mtrl_no ;
+
+--开始时间前的未发
+truncate table t1318_prod_t;
+
+insert into t1318_prod_t(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,prod_integer)
+select t1318_list.area ,
+		 t1318_list.chandi ,
+		 t1318_list.dept_no ,
+		 t1318_list.mtrl_class,
+		 t1318_list.mtrl_class_code,
+		 t1318_list.mtrl_no,	
+		 round(sum(coalesce(t1318_list.plan_integer,0)),2)
+ from t1318_list
+where t1318_list.about_deliver_date <adt_start
+group by t1318_list.area ,
+			t1318_list.chandi ,
+			t1318_list.dept_no ,
+			t1318_list.mtrl_class,
+			t1318_list.mtrl_class_code,
+			t1318_list.mtrl_no;
+
+update t1318_r 
+set   weifa_qty = t1318_prod_t.prod_integer 
+from t1318_prod_t
+where t1318_r.dept_no = t1318_prod_t.dept_no and
+		t1318_r.mtrl_name = t1318_prod_t.mtrl_no ;
+
+--实时库存
+
+update t1318_r 
+set   stock_qty = t1318_stock.stock_integer 
+from t1318_stock
+where t1318_r.dept_no = t1318_stock.dept_no and
+		t1318_r.mtrl_name = t1318_stock.mtrl_no ;
+
+ad_month_str = (date_trunc('month',current_date)) :: date  ; 
+
+raise notice '1 %',clock_timestamp();
+insert into t1318_deliver(ware_no,mtrl_no,deliver_integer)
+select 
+		 xs_yw_sale_order_info.factory_code ,
+		 xs_yw_sale_order_info.mtrl_no,	
+		 round(sum(coalesce(xs_yw_sale_order_info.deliver_integer,0)),2)
+ from xs_yw_sale_order_info 
+where  
+		 xs_yw_sale_order_info.plan_status in ('实发','结案')   and
+		 xs_yw_sale_order_info.deliver_date >= ad_month_str  and
+		 xs_yw_sale_order_info.deliver_date <= current_date 
+group by xs_yw_sale_order_info.factory_code ,
+			xs_yw_sale_order_info.mtrl_no;
+raise notice '1.1 %',clock_timestamp();
+insert into t1318_deliver(ware_no,mtrl_no,deliver_integer)
+select 
+		 xs_yw_yk_order_info.factory_code ,
+		 xs_yw_yk_order_info.mtrl_no,	
+		 round(sum(coalesce(xs_yw_yk_order_info.deliver_integer,0)),2)
+ from xs_yw_yk_order_info 
+where  
+		 xs_yw_yk_order_info.plan_status in ('实发','结案') and
+		 xs_yw_yk_order_info.deliver_date >= ad_month_str  and
+		 xs_yw_yk_order_info.deliver_date <= current_date       
+group by xs_yw_yk_order_info.factory_code ,
+			xs_yw_yk_order_info.mtrl_no;
+
+raise notice '1.2 %',clock_timestamp();
+truncate table t1318_prod_t;
+insert into t1318_prod_t(area,chandi,dept_no,mtrl_class,mtrl_class_code,mtrl_no,prod_integer)
+select t1318_dept.area ,
+		 t1318_dept.chandi ,
+		 t1318_dept.dept_no ,
+		 t1318_mtrl.mtrl_class,
+		 t1318_mtrl.mtrl_class_code,
+		 t1318_deliver.mtrl_no,	
+		 round(sum(coalesce(t1318_deliver.deliver_integer,0)),2)
+ from t1318_deliver ,
+		t1318_mtrl,
+		t1318_dept 
+where  t1318_deliver.mtrl_no = t1318_mtrl.mtrl_no  and
+		 t1318_deliver.ware_no = t1318_dept.ware_no   
+group by t1318_dept.area ,
+			t1318_dept.chandi ,
+			t1318_dept.dept_no ,
+			t1318_mtrl.mtrl_class,
+			t1318_mtrl.mtrl_class_code,
+			t1318_deliver.mtrl_no;
+
+ --实时库存
+
+update t1318_r 
+set   deliver_integer = t1318_prod_t.prod_integer 
+from t1318_prod_t
+where t1318_r.dept_no = t1318_prod_t.dept_no and
+      t1318_r.mtrl_name = t1318_prod_t.mtrl_no ;
+
+raise notice '2 %',clock_timestamp();
+	
+--2019.1.4 更新name 调整到后面 crd
+-- update t1318_r 
+-- set   mtrl_name = jc_material.materialname 
+-- from jc_material
+-- where t1318_r.mtrl_name = jc_material.materialid;
+
+update t1318_r 
+set  dept_no = jc_department.departmentname 
+from jc_department
+where t1318_r.dept_no = jc_department.departmentid;
+
+update t1318_r
+set chandi = jc_place.place_name
+from jc_place
+where t1318_r.chandi = jc_place.place_code;
+
+update t1318_r
+set big_class = c1.classification_name
+from mdm_classification c2
+join mdm_classification c1
+on c1.classification_code = c2.classification_code_parent
+where mtrl_class_code = c2.classification_code ;
+--替换
+-- update t1318_r
+-- set big_class = sc_jc_analysis_class_sort.mtrl_big_class
+-- from sc_jc_analysis_class_sort
+-- where mtrl_class = sc_jc_analysis_class_sort.mtrl_sml_class ;
+
+raise notice '3 %',clock_timestamp();
+
+ if as_t ='1' then
+	 insert into t1318_r2(area,chandi,mtrl_class,mtrl_class_code,mtrl_name,text,deliver_integer,stock_qty,prod_qty,weifa_qty,weifa_qty2,plan_integer)
+	  select area,chandi,mtrl_class,mtrl_class_code,mtrl_name,text,sum(deliver_integer),
+	  sum(stock_qty), sum(prod_qty), sum(weifa_qty), sum(weifa_qty2),sum(plan_integer)
+	  from t1318_r
+	  group by area,chandi,mtrl_class,mtrl_class_code,mtrl_name,text;
+		
+		update t1318_r2
+		set big_class = c1.classification_name
+		from mdm_classification c2
+		join mdm_classification c1
+		on c1.classification_code = c2.classification_code_parent
+		where mtrl_class_code = c2.classification_code ;
+-- 	替换
+-- 	update t1318_r2
+-- 	set big_class = sc_jc_analysis_class_sort.mtrl_big_class
+-- 	from sc_jc_analysis_class_sort
+-- 	where mtrl_class = sc_jc_analysis_class_sort.mtrl_sml_class ;
+  else
+	 insert into t1318_r2(area,chandi,big_class,mtrl_class,mtrl_class_code,mtrl_name,dept_no,text,deliver_integer,stock_qty,prod_qty,weifa_qty,weifa_qty2,plan_integer)
+	  select area,chandi,big_class,mtrl_class,mtrl_class_code,mtrl_name,dept_no,text,deliver_integer,
+	  stock_qty, prod_qty, weifa_qty, weifa_qty2,plan_integer
+	  from t1318_r;
+  end if;
+  raise notice '4 %',clock_timestamp();
+
+-- 2021-12-7 李康帅  暂时没有此表，礼盒在界面暂时也没发现，先注释
+-- update t1318_r2 
+-- set   if_lihe = '礼盒'
+-- from sc_jc_dictionary
+-- where t1318_r2.mtrl_name = sc_jc_dictionary.dict_name;
+
+
+
+update t1318_r2 
+set   mtrl_name = mdm_material.material_name 
+from mdm_material
+where t1318_r2.mtrl_name = mdm_material.material_code;
+  
+raise notice '5 %',clock_timestamp();
+
+
+
+for rs in execute 'select * from t1318_r2' 
+loop 
+  return next rs ;
+end loop ;
+-- 
+end
+$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100
+  ROWS 1000

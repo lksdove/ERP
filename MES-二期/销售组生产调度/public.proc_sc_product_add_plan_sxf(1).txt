@@ -1,0 +1,511 @@
+CREATE OR REPLACE FUNCTION "public"."proc_sc_product_add_plan_sxf"("as_place" varchar, "as_dept" varchar, "ad_date" date, "as_userid" varchar)
+  RETURNS "pg_catalog"."int4" AS $BODY$
+--***********************************************************************
+--集团追加计划
+--***********************************************************************
+declare ll_month integer;ll_year integer;ll_month_next integer;ll_year_next integer;
+        ld_start date;ld_start_next date;rs record;
+begin
+
+
+	create temp table t_prod_plan
+	(
+	   pianqu               VARCHAR(20)          ,
+	   place_name           VARCHAR(20)          ,
+	   dept_no 	        varchar(10)	     ,
+	   big_mtrl_class       VARCHAR(30)          ,
+	   mtrl_class           VARCHAR(30)          ,
+	   mtrl_no              VARCHAR(10)          ,
+	   mtrl_stock           DECIMAL(20,2)        ,
+	   this_nodeliver       DECIMAL(20,2)        ,--本月未发
+	   next_nodeliver       DECIMAL(20,2)        ,--下月未发
+	   may_plan	        DECIMAL(20,2)        ,--下达总量
+	   next_plan 		decimal(20,2)        ,--下月计划
+	   have_product         DECIMAL(20,2)        ,--已经生产量
+	   un_prdt_plan         DECIMAL(20,2)        ,--到月底生产计划
+	   this_lack             DECIMAL(20,2)        ,--本月余缺
+	   next_lack           DECIMAL(20,2)        --下月余缺
+	)ON COMMIT DROP;
+
+
+
+	create temp table t_prod_plan_temp
+	(
+	   pianqu               VARCHAR(20)          ,
+	   place_name           VARCHAR(20)          ,
+	   dept_no 	        varchar(10)	     ,
+	   mtrl_no              VARCHAR(10)          ,
+	   mtrl_stock           DECIMAL(20,2)        ,
+	   this_nodeliver       DECIMAL(20,2)        ,--本月未发
+	   next_nodeliver       DECIMAL(20,2)        ,--下月未发
+	   may_plan	        DECIMAL(20,2)        ,--下达总量
+	   next_plan 		decimal(20,2)        ,--下月计划
+	   have_product         DECIMAL(20,2)        ,--已经生产量
+	   un_prdt_plan         DECIMAL(20,2)        --到月底生产计划
+	)ON COMMIT DROP;
+
+	create temp table t_prod_plan_diff
+	(
+	   pianqu               VARCHAR(20)          ,
+	   place_name           VARCHAR(20)          ,
+	   dept_no 	        varchar(10)	     ,
+	   mtrl_no              VARCHAR(10)          ,
+	   diff_plan	        DECIMAL(20,2)         --计划调整量
+	)ON COMMIT DROP;
+
+
+	create local TEMPORARY table t_dept
+	(
+	   pianqu varchar(32),	
+	   place_name varchar(32),
+	   place_code varchar(10),
+	   dept_no varchar(10),
+	   dept_name  varchar(100)
+	)ON COMMIT DROP;
+
+	create local TEMPORARY table t_mtrl
+	(
+	   mtrl_no varchar(10),	
+	   mtrl_class varchar(32)
+	)ON COMMIT DROP;
+
+
+	--格式转换，年份、月份
+	ll_year = date_part('year',ad_date);
+	ll_month = date_part('month',ad_date);
+	ld_start = date_trunc('month',ad_date); --本月月初
+	
+	ll_year_next = date_part('year',(ad_date+interval '1 month'));
+	ll_month_next = date_part('month',(ad_date+interval '1 month'));
+	ld_start_next = date_trunc('month',(ad_date+interval '1 month')); --下月月初
+
+
+--1、获取 产品产能分类 二级类
+
+	insert into t_mtrl(mtrl_no,mtrl_class)
+	select jc_materialascription.materialid ,
+	       jc_materialascription.typename
+	 from jc_materialascription
+	 where jc_materialascription.classname = '产品产能分类' and
+	       jc_materialascription.rank =2 ;
+
+--2、获取 片区产地工厂（根据传入参数判断是否清除杭州的）
+
+	insert into t_dept(dept_no,dept_name,place_code,place_name,pianqu)
+	  SELECT DISTINCT jc_higherdepartment.ancientid,jc_department.departmentname,
+		jc_department.placecode,jc_place.place_name,
+		jc_pianqu.departmentname
+	    FROM jc_departmentascription,   
+		 jc_higherdepartment,
+		jc_department,jc_place,jc_rankdiagram,jc_department jc_pianqu
+	   WHERE ( jc_departmentascription.departmentid = jc_higherdepartment.departmentid ) and  
+		 ( ( jc_departmentascription.classname = '部门分类' ) AND  
+		 ( jc_departmentascription.typename = '成品仓库' ) AND  
+		 ( jc_departmentascription.rank = 1 ) AND  
+		 ( jc_higherdepartment.ranktype = '行政' ) AND  
+		 ( jc_higherdepartment.ancientrankid = 20 ))  and
+		( jc_higherdepartment.ancientid = jc_department.departmentid ) and
+		jc_department.placecode = jc_place.place_code and
+		jc_higherdepartment.ancientid  = jc_rankdiagram.departmentid and
+		jc_rankdiagram.ranktype = '生产组织' and
+		jc_rankdiagram.parentid = jc_pianqu.departmentid and
+		jc_place.place_name like as_place and
+		jc_higherdepartment.ancientid like as_dept ;
+
+	if as_dept <> '%' then
+		delete from t_dept
+		where place_name <> '杭州' ;
+	else
+		delete from t_dept
+		where place_name = '杭州' ;
+	end if;
+	
+--3、获取所有物料的库存
+
+	--库存
+	insert into t_prod_plan_temp(pianqu,place_name,dept_no,mtrl_no,mtrl_stock)
+	SELECT   t_dept.pianqu,
+                 t_dept.place_name,
+		 t_dept.dept_no,
+		 cg_yw_stock.mtrl_no,
+		 sum(coalesce(cg_yw_stock.stock_amount,0))
+	FROM 	t_dept,   
+		t_mtrl,   
+		cg_yw_stock  
+	WHERE 	 ( t_dept.dept_no= cg_yw_stock.plant_no ) and  
+		 ( cg_yw_stock.mtrl_no = t_mtrl.mtrl_no ) and  
+		 ( cg_yw_stock.stock_amount <> 0 )  
+	 group by t_dept,pianqu,
+                 t_dept.place_name,
+		 t_dept.dept_no,
+		  cg_yw_stock.mtrl_no;
+
+--4、获取本月未发（xs_yw_sale_order_info）
+
+	--本月未发
+	insert into t_prod_plan_temp(pianqu,place_name,dept_no,mtrl_no,this_nodeliver)
+	SELECT   t_dept.pianqu,
+		 t_dept.place_name,
+		 t_dept.dept_no,
+		 xs_yw_sale_order_info.mtrl_no,
+		coalesce(sum(xs_yw_sale_order_info.plan_integer),0)
+	from xs_yw_sale_order_info,t_mtrl,t_dept,jc_higherdepartment
+	where xs_yw_sale_order_info.mtrl_no = t_mtrl.mtrl_no and
+	      xs_yw_sale_order_info.ware_no =jc_higherdepartment.departmentid and
+	      jc_higherdepartment.ranktype = '行政' AND  
+	      jc_higherdepartment.ancientrankid = 20   and
+	       jc_higherdepartment.ancientid = t_dept.dept_no and
+	      ( xs_yw_sale_order_info.plan_status in ( '确认','调度','打印出库单') ) and
+	      xs_yw_sale_order_info.request_deliver_date < ld_start_next and
+	       xs_yw_sale_order_info.request_deliver_date > current_date -  interval '3 month '
+	group by t_dept.pianqu,
+		 t_dept.place_name,
+		 t_dept.dept_no,
+		 xs_yw_sale_order_info.mtrl_no;
+
+	--本月未发
+	insert into t_prod_plan_temp(pianqu,place_name,dept_no,mtrl_no,this_nodeliver)
+	SELECT   t_dept.pianqu,
+		 t_dept.place_name,
+		 t_dept.dept_no,
+		xs_yw_yk_order_info.mtrl_no,
+		coalesce(sum(xs_yw_yk_order_info.plan_integer),0)
+	from xs_yw_yk_order_info,t_mtrl,t_dept,jc_higherdepartment
+	where xs_yw_yk_order_info.mtrl_no = t_mtrl.mtrl_no and
+	      xs_yw_yk_order_info.ware_no =jc_higherdepartment.departmentid and
+	      jc_higherdepartment.ranktype = '行政' AND  
+	      jc_higherdepartment.ancientrankid = 20   and
+	       jc_higherdepartment.ancientid = t_dept.dept_no and
+	      ( xs_yw_yk_order_info.plan_status in ( '确认','调度调度','打印出库单') ) and    
+	       xs_yw_yk_order_info.request_deliver_date > current_date -  interval '3 month ' and
+	       xs_yw_yk_order_info.request_deliver_date < ld_start_next
+	group by t_dept.pianqu,
+		 t_dept.place_name,
+		 t_dept.dept_no,
+		xs_yw_yk_order_info.mtrl_no;
+
+
+--5、获取下月未发（xs_yw_sale_order_info）
+
+	--下月未发
+	insert into t_prod_plan_temp(pianqu,place_name,dept_no,mtrl_no,next_nodeliver)
+	SELECT   t_dept.pianqu,
+		 t_dept.place_name,
+		 t_dept.dept_no,
+		 xs_yw_sale_order_info.mtrl_no,
+		coalesce(sum(xs_yw_sale_order_info.plan_integer),0)
+	from xs_yw_sale_order_info,t_mtrl,t_dept,jc_higherdepartment
+	where xs_yw_sale_order_info.mtrl_no = t_mtrl.mtrl_no and
+	      xs_yw_sale_order_info.ware_no =jc_higherdepartment.departmentid and
+	      jc_higherdepartment.ranktype = '行政' AND  
+	      jc_higherdepartment.ancientrankid = 20   and
+	       jc_higherdepartment.ancientid = t_dept.dept_no and
+	      ( xs_yw_sale_order_info.plan_status in ( '确认','调度','打印出库单') ) and
+	      xs_yw_sale_order_info.request_deliver_date >= ld_start_next and
+	       xs_yw_sale_order_info.request_deliver_date > current_date -  interval '3 month '
+	group by t_dept.pianqu,
+		 t_dept.place_name,
+		 t_dept.dept_no,
+		 xs_yw_sale_order_info.mtrl_no;
+
+	--下月未发
+	insert into t_prod_plan_temp(pianqu,place_name,dept_no,mtrl_no,next_nodeliver)
+	SELECT   t_dept.pianqu,
+		 t_dept.place_name,
+		 t_dept.dept_no,
+		xs_yw_yk_order_info.mtrl_no,
+		coalesce(sum(xs_yw_yk_order_info.plan_integer),0)
+	from xs_yw_yk_order_info,t_mtrl,t_dept,jc_higherdepartment
+	where xs_yw_yk_order_info.mtrl_no = t_mtrl.mtrl_no and
+	      xs_yw_yk_order_info.ware_no =jc_higherdepartment.departmentid and
+	      jc_higherdepartment.ranktype = '行政' AND  
+	      jc_higherdepartment.ancientrankid = 20   and
+	       jc_higherdepartment.ancientid = t_dept.dept_no and
+	      ( xs_yw_yk_order_info.plan_status in ( '确认','调度','打印出库单') ) and    
+	       xs_yw_yk_order_info.request_deliver_date > current_date -  interval '3 month ' and
+	       xs_yw_yk_order_info.request_deliver_date >= ld_start_next
+	group by t_dept.pianqu,
+		 t_dept.place_name,
+		 t_dept.dept_no,
+		xs_yw_yk_order_info.mtrl_no;
+
+--6、计划下达总量（sc_product_plan_line）
+
+	--计划下达总量may_plan
+	insert into t_prod_plan_temp(pianqu,place_name,dept_no,mtrl_no,may_plan)
+	select sc_product_plan_line.pianqu,
+	       sc_product_plan_line.place_name,
+	       sc_product_plan_line.dept_no,
+	       sc_product_plan_line.mtrl_no,
+	       sum(sc_product_plan_line.affirm_plan)
+	from sc_product_plan_line,t_dept,t_mtrl
+	where sc_product_plan_line.dept_no = t_dept.dept_no and
+	      sc_product_plan_line.mtrl_no = t_mtrl.mtrl_no and
+	      sc_product_plan_line.the_year =ll_year and
+	      sc_product_plan_line.the_month = ll_month and
+	      sc_product_plan_line.status ='审核' 
+	group by sc_product_plan_line.pianqu,
+	       sc_product_plan_line.place_name,
+	       sc_product_plan_line.dept_no,
+	       sc_product_plan_line.mtrl_no;
+
+
+--7、下月计划（sc_product_plan_line）
+
+	--下月计划
+	insert into t_prod_plan_temp(pianqu,place_name,dept_no,mtrl_no,next_plan)
+	select sc_product_plan_line.pianqu,
+	       sc_product_plan_line.place_name,
+	       sc_product_plan_line.dept_no,
+	       sc_product_plan_line.mtrl_no,
+	       sum(sc_product_plan_line.affirm_plan)
+	from sc_product_plan_line,t_dept,t_mtrl
+	where sc_product_plan_line.dept_no = t_dept.dept_no and
+	      sc_product_plan_line.mtrl_no = t_mtrl.mtrl_no and
+	      sc_product_plan_line.the_year =ll_year_next and
+	      sc_product_plan_line.the_month = ll_month_next and
+	      sc_product_plan_line.status ='审核' 
+	group by sc_product_plan_line.pianqu,
+	       sc_product_plan_line.place_name,
+	       sc_product_plan_line.dept_no,
+	       sc_product_plan_line.mtrl_no;
+	    
+--8、已生产量（mes本月的入库量）
+
+	insert into t_prod_plan_temp(pianqu,place_name,dept_no,mtrl_no,have_product)   
+	SELECT   t_dept.pianqu,
+		 t_dept.place_name,
+		 t_dept.dept_no,
+                 mes_pp_processorder.matnr,
+                 sum(mes_pp_processorder.rkamount)
+        from mes_pp_processorder,t_dept,t_mtrl,jc_dept_to_r3
+	where mes_pp_processorder.werks = jc_dept_to_r3.loca_no and
+	      jc_dept_to_r3.fun_type ='工厂' and
+	      jc_dept_to_r3.dept_no = t_dept.dept_no and
+	      mes_pp_processorder.matnr = t_mtrl.mtrl_no and
+	      mes_pp_processorder.rkamount >0 and
+              mes_pp_processorder.pdate >=ld_start and
+              mes_pp_processorder.pdate < ad_date 
+	group by t_dept.pianqu,
+		 t_dept.place_name,
+		 t_dept.dept_no,
+                 mes_pp_processorder.matnr ; 
+
+--9、 到月底生产计划
+
+	insert into t_prod_plan_temp(pianqu,place_name,dept_no,mtrl_no,un_prdt_plan)   
+	SELECT   t_dept.pianqu,
+		 t_dept.place_name,
+		 t_dept.dept_no,
+		 sc_yw_product_plan.mtrl_no,
+		 coalesce(sum(sc_yw_product_plan.agree_amount),0)
+	from sc_yw_product_plan,t_mtrl,t_dept
+	where   ( sc_yw_product_plan.begin_date >= ad_date ) and
+	        ( sc_yw_product_plan.begin_date <ld_start_next ) and
+		( sc_yw_product_plan.status = '审核' ) and
+		  sc_yw_product_plan.prod_org = t_dept.dept_no and
+		( sc_yw_product_plan.org_type = '生产组织' ) and
+		( sc_yw_product_plan.prod_type = '正常' ) and
+		( sc_yw_product_plan.plan_type in ('50','70') ) and
+		( sc_yw_product_plan.mtrl_no = t_mtrl.mtrl_no ) 
+	group by    t_dept.pianqu,
+		 t_dept.place_name,
+		 t_dept.dept_no,
+		 sc_yw_product_plan.mtrl_no 
+	having  coalesce(sum(sc_yw_product_plan.agree_amount),0) >0;
+
+
+	if as_dept <> '%' then
+		insert into t_prod_plan(pianqu,place_name,dept_no,mtrl_no,mtrl_stock,this_nodeliver,
+		next_nodeliver,may_plan,have_product,un_prdt_plan,next_plan)
+		select pianqu,place_name,dept_no,mtrl_no,
+			sum(mtrl_stock),
+			sum(this_nodeliver),
+			sum(next_nodeliver),
+			sum(may_plan),
+			sum(have_product),
+			sum(un_prdt_plan),
+			sum(next_plan)
+		from t_prod_plan_temp
+		group by  pianqu,place_name,dept_no,mtrl_no ; 
+
+
+
+		insert into t_prod_plan_diff ( place_name,mtrl_no,dept_no,diff_plan)
+		select  place_name,mtrl_no,dept_no,sum(coalesce(new_no_complete,0) - (coalesce(may_plan,0) + coalesce(have_add_plan,0) - coalesce(have_product,0)))
+		from sc_product_plan_detail
+		where sc_product_plan_detail.the_year = ll_year and
+		     sc_product_plan_detail.the_month =ll_month and
+		     sc_product_plan_detail.plan_type in ('中旬','下旬') and
+		     sc_product_plan_detail.dept_no =  as_dept and
+		     sc_product_plan_detail.status = '确认' and
+		     (coalesce(new_no_complete,0) - (coalesce(may_plan,0) + coalesce(have_add_plan,0) - coalesce(have_product,0))) <0 
+		group by place_name,mtrl_no,dept_no ;
+
+		update t_prod_plan
+		set may_plan = coalesce(may_plan,0) + coalesce(t_prod_plan_diff.diff_plan,0)
+		from t_prod_plan_diff
+		where t_prod_plan.dept_no = t_prod_plan_diff.dept_no and
+		      t_prod_plan.mtrl_no = t_prod_plan_diff.mtrl_no ;
+
+
+	else
+		insert into t_prod_plan(pianqu,place_name,mtrl_no,mtrl_stock,this_nodeliver,
+		next_nodeliver,may_plan,have_product,un_prdt_plan,next_plan)
+		select pianqu,place_name,mtrl_no,
+			sum(mtrl_stock),
+			sum(this_nodeliver),
+			sum(next_nodeliver),
+			sum(may_plan),
+			sum(have_product),
+			sum(un_prdt_plan),
+			sum(next_plan)
+		from t_prod_plan_temp
+		group by  pianqu,place_name,mtrl_no ; 
+
+		insert into t_prod_plan_diff ( place_name,mtrl_no,diff_plan)
+		select  place_name,mtrl_no,sum(coalesce(new_no_complete,0) - (coalesce(may_plan,0) + coalesce(have_add_plan,0) - coalesce(have_product,0)))
+		from sc_product_plan_main
+		where sc_product_plan_main.the_year = ll_year and
+		     sc_product_plan_main.the_month =ll_month and
+		     sc_product_plan_main.plan_type in ('中旬','下旬') and
+		     sc_product_plan_main.place_name =  as_place and
+		     sc_product_plan_main.status = '确认' and
+		     (coalesce(new_no_complete,0) - (coalesce(may_plan,0) + coalesce(have_add_plan,0) - coalesce(have_product,0))) <0 
+		group by place_name,mtrl_no ;
+
+		update t_prod_plan
+		set may_plan = coalesce(may_plan,0) + coalesce(t_prod_plan_diff.diff_plan,0)
+		from t_prod_plan_diff
+		where t_prod_plan.place_name = t_prod_plan_diff.place_name and
+		      t_prod_plan.mtrl_no = t_prod_plan_diff.mtrl_no ;
+	end if;
+
+ 	delete from t_prod_plan where coalesce(this_nodeliver,0) = 0 and coalesce(un_prdt_plan,0) = 0 and
+				      coalesce(next_nodeliver,0) = 0;
+
+--10、本月余缺
+
+	--修改当已生产量大于计划量时，算缺口时为0计算，否则库存被冲抵掉了 modify  by sxf 20170815
+	update t_prod_plan
+	set this_lack = ( coalesce(may_plan,0) - coalesce(have_product,0)) + coalesce(mtrl_stock,0) - coalesce(this_nodeliver,0)
+	where ( coalesce(may_plan,0) - coalesce(have_product,0)) >=0;
+
+	update t_prod_plan
+	set this_lack =  coalesce(mtrl_stock,0) - coalesce(this_nodeliver,0)
+	where ( coalesce(may_plan,0) - coalesce(have_product,0)) < 0;
+--11、下月余缺
+	
+	update t_prod_plan
+	set next_lack = coalesce(this_lack,0) + coalesce(next_plan,0)- coalesce(next_nodeliver,0);
+
+--12、生成
+
+	update t_prod_plan
+	set big_mtrl_class  = jc_materialascription.typename
+	from jc_materialascription
+	where t_prod_plan.mtrl_no = jc_materialascription.materialid and
+	      jc_materialascription.classname = '产品产能分类' and
+	      jc_materialascription.rank =1;
+	   
+
+	update t_prod_plan
+	set mtrl_class  = jc_materialascription.typename
+	from jc_materialascription
+	where t_prod_plan.mtrl_no = jc_materialascription.materialid and
+	      jc_materialascription.classname = '产品产能分类' and
+	      jc_materialascription.rank =2;
+--12\1 杭州生成
+	if as_dept <> '%' then
+			
+
+		delete from t_prod_plan
+		using sc_product_plan_line
+		where sc_product_plan_line.plan_type = '追加' and
+		      sc_product_plan_line.the_year = ll_year and 
+		      sc_product_plan_line.the_month = ll_month and
+		      sc_product_plan_line.dept_no = as_dept and
+		      sc_product_plan_line.dept_no = t_prod_plan.dept_no and
+		      sc_product_plan_line.mtrl_no = t_prod_plan.mtrl_no and
+		      sc_product_plan_line.create_date = ad_date  and
+		      sc_product_plan_line.status <> '作废' ;
+
+		      
+		update sc_product_plan_detail
+		set status = '作废',
+		    oper_man = as_userid,
+		    oper_time = current_timestamp(0)
+		where sc_product_plan_detail.the_year = ll_year and
+		     sc_product_plan_detail.the_month =ll_month and
+		     sc_product_plan_detail.plan_type = '追加' and
+		     sc_product_plan_detail.dept_no =  as_dept and
+		     sc_product_plan_detail.create_date = ad_date and
+		     sc_product_plan_detail.status = '确认' and
+		     not exists(select 1 from sc_product_plan_line 
+				where sc_product_plan_detail.plan_type =sc_product_plan_line.plan_type and
+				       sc_product_plan_detail.the_year = sc_product_plan_line.the_year and
+				       sc_product_plan_detail.the_month = sc_product_plan_line.the_month and
+				       sc_product_plan_detail.create_date = sc_product_plan_line.create_date and
+				       sc_product_plan_detail.dept_no = sc_product_plan_line.dept_no and
+				       sc_product_plan_detail.mtrl_no = sc_product_plan_line.mtrl_no and	
+				       sc_product_plan_line.status <> '作废' );
+				         	       
+		      
+		insert into sc_product_plan_detail(the_year,the_month,plan_type,
+		pianqu,place_name,dept_no,big_mtrl_class,
+		mtrl_class,mtrl_no,mtrl_stock,this_nodeliver,next_nodeliver,may_plan,have_product,
+		un_prdt_plan,this_lack,next_lack,create_date,oper_man,oper_time,status ,next_plan)
+		select ll_year,ll_month,'追加',pianqu,place_name,dept_no,big_mtrl_class,
+		mtrl_class,mtrl_no,mtrl_stock,this_nodeliver,next_nodeliver,may_plan,have_product,
+		un_prdt_plan,this_lack,next_lack,ad_date,as_userid,current_timestamp(0),'确认',next_plan
+		from t_prod_plan;
+
+	else
+--12\2外地生成
+
+		delete from t_prod_plan
+		using sc_product_plan_line
+		where sc_product_plan_line.plan_type = '追加' and
+		      sc_product_plan_line.the_year = ll_year and 
+		      sc_product_plan_line.the_month = ll_month and
+		      sc_product_plan_line.place_name =  as_place and
+		      sc_product_plan_line.place_name = t_prod_plan.place_name and
+		      sc_product_plan_line.mtrl_no = t_prod_plan.mtrl_no and
+		      sc_product_plan_line.create_date = ad_date  and
+		      sc_product_plan_line.status <> '作废' ;
+
+		      
+		update sc_product_plan_main
+		set status = '作废',
+		    oper_man = as_userid,
+		    oper_time = current_timestamp(0)
+		where sc_product_plan_main.the_year = ll_year and
+		     sc_product_plan_main.the_month =ll_month and
+		     sc_product_plan_main.plan_type = '追加' and
+		     sc_product_plan_main.place_name =  as_place and
+		     sc_product_plan_main.create_date = ad_date and
+		     sc_product_plan_main.status = '确认' and
+		     not exists(select 1 from sc_product_plan_line 
+				where sc_product_plan_main.plan_type =sc_product_plan_line.plan_type and
+				       sc_product_plan_main.the_year = sc_product_plan_line.the_year and
+				       sc_product_plan_main.the_month = sc_product_plan_line.the_month and
+				       sc_product_plan_main.create_date = sc_product_plan_line.create_date and
+				       sc_product_plan_main.place_name = sc_product_plan_line.place_name and
+				       sc_product_plan_main.mtrl_no = sc_product_plan_line.mtrl_no and	
+				       sc_product_plan_line.status <> '作废' );
+
+		insert into sc_product_plan_main(the_year,the_month,plan_type,
+		pianqu,place_name,big_mtrl_class,
+		mtrl_class,mtrl_no,mtrl_stock,this_nodeliver,next_nodeliver,may_plan,have_product,
+		un_prdt_plan,this_lack,next_lack,create_date,oper_man,oper_time,status,next_plan)
+		select ll_year,ll_month,'追加',pianqu,place_name,big_mtrl_class,
+		mtrl_class,mtrl_no,mtrl_stock,this_nodeliver,next_nodeliver,may_plan,have_product,
+		un_prdt_plan,this_lack,next_lack,ad_date,as_userid,current_timestamp(0),'确认',next_plan
+		from t_prod_plan;
+
+	end if;
+return 1;
+end
+$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100

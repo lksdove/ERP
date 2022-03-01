@@ -1,0 +1,940 @@
+CREATE OR REPLACE FUNCTION "public"."proc_deliver_order_notsend_all_cl"("as_dept" varchar, "adt_p_from" timestamp, "adt_p_to" timestamp, "adt_x_from" timestamp, "adt_x_to" timestamp, "as_compute" varchar)
+  RETURNS SETOF "pg_catalog"."record" AS $BODY$
+
+declare rs record;rs_place record ;
+
+declare ll_series_no integer;ll_serial integer =0;ldt_request_date date;ldec_dunwei numeric(20,2);
+declare ls_street varchar(50);ldec_best numeric(20,2);ll_count integer;ll_order_no integer;ll_order_itemno integer;
+begin
+
+-- binicool 指定发货旬 模式取消，代码恢复
+-- if as_dept = '2601' or as_dept = '0102' then
+-- 	return ;
+-- end if;3
+
+--检查临时表是否存在
+--建临时表
+PERFORM schemaname FROM pg_stat_user_tables where relname ='t_order_notsend_all';
+
+
+
+IF NOT FOUND THEN
+   create local TEMPORARY table t_order_notsend_all(
+                                                    order_no integer null,              --订单号
+                                                    order_itemno integer null,          --订单项目号
+                                                    outware_sheet_no varchar(20) null,  --交货单号
+                                                    sheet_item_no integer null,         --交货单项目号
+                                                    customer_no varchar(10) null,       --客户代码
+                                                    customer_name varchar(200) null,    --客户名称
+                                                    mtrl_no varchar(10) null,           --产品代码
+                                                    materialname varchar(100) null,     --产品名称
+                                                    plan_integer numeric(20,8) null,    --订单数量
+                                                    about_deliver_date timestamp null,  --订单排货日期
+                                                    market_deliver_day timestamp null,  --市场排货日期
+                                                    ware_no varchar(10) null,           --仓库代码
+                                                    ware_name varchar(100) null,        --仓库名称
+                                                    plan_time timestamp null,           --报站时间
+                                                    unitweight numeric(20,8) null,
+                                                    plan_weight numeric(20,8) null,
+                                                    trans_way varchar(10) null,         --运输方式
+                                                    deliver_type varchar(20) null,      --发货类型    
+                                                    deliver_note varchar(200) null,     --排货备注   
+                                                    assign_status varchar(10) null,     --排货状态 
+                                                    dispatch_time timestamp null,       --调度时间
+                                                    ship_to_addr varchar(150) null,     --送货地址 goto_addr
+                                                    place_name varchar(50) null,        --地点名称    
+                                                    district_name varchar(50) null,     --地区
+                                                    market varchar(40) null,            --市场
+                                                    case_price numeric(20,8) null,      --价格
+                                                    unit_no varchar(12) null,           --计量单位
+                                                    connector varchar(32) null,   
+                                                    phone varchar(50) null,
+                                                    postcode varchar(12) null,
+                                                    communite_addr varchar(200) null,
+                                                    pin_no varchar(200) null,
+                                                    trans_note varchar(200) null,
+                                                    typename_a varchar(32) null,
+                                                    typename_b varchar(32) null,
+                                                    sal_customer_no varchar(10) null,   --提货客户代码
+                                                    station_no varchar(12) null,        --车站代码
+                                                    bill_type varchar(12) null,
+                                                    lun_month integer null,
+                                                    lun_sort integer null,
+                                                    sal_customer_name varchar(100) null, --提货客户
+						    request_deliver_date date,
+						    city varchar(30) ,
+						    street varchar(50),
+						    series_no integer null,
+						    need_pin integer,
+						    best_dunwei numeric(20,2),
+						    place_code varchar(10),
+						     pin_order varchar(50),
+						     pin_number integer,
+						     distance  numeric(20,2),
+						    pianqu  varchar(32) null,
+						    aufsd varchar(10) null ,          --冻结状态
+						    obj_properties  varchar(30) null,
+						    request_deliver_xun varchar(12) null, --指定交货时间段	
+						      p_year integer null,
+							p_month integer null,
+							p_xun  varchar(10) null			 
+                                                    ) ON COMMIT DROP; 
+END IF;
+
+PERFORM schemaname FROM pg_stat_user_tables where relname ='t_order_notsend_t';
+
+IF NOT FOUND THEN
+   create local TEMPORARY table t_order_notsend_t(
+                                                    order_no integer null,              --订单号
+                                                    order_itemno integer null,          --订单项目号
+                                                    outware_sheet_no varchar(20) null,  --交货单号
+                                                    sheet_item_no integer null,         --交货单项目号
+                                                    customer_no varchar(10) null,       --客户代码
+                                                    customer_name varchar(200) null,    --客户名称
+                                                    mtrl_no varchar(10) null,           --产品代码
+                                                    materialname varchar(100) null,     --产品名称
+                                                    plan_integer numeric(20,8) null,    --订单数量
+                                                    about_deliver_date timestamp null,  --订单排货日期
+                                                    market_deliver_day timestamp null,  --市场排货日期
+                                                    ware_no varchar(10) null,           --仓库代码
+                                                    ware_name varchar(100) null,        --仓库名称
+                                                    plan_time timestamp null,           --报站时间
+                                                    unitweight numeric(20,8) null,
+                                                    plan_weight numeric(20,8) null,
+                                                    trans_way varchar(10) null,         --运输方式
+                                                    deliver_type varchar(20) null,      --发货类型    
+                                                    deliver_note varchar(200) null,     --排货备注   
+                                                    assign_status varchar(10) null,     --排货状态 
+                                                    dispatch_time timestamp null,       --调度时间
+                                                    ship_to_addr varchar(150) null,     --送货地址 goto_addr
+                                                    place_name varchar(50) null,        --地点名称    
+                                                    district_name varchar(50) null,     --地区
+                                                    market varchar(40) null,            --市场
+                                                    case_price numeric(20,8) null,      --价格
+                                                    unit_no varchar(12) null,           --计量单位
+                                                    connector varchar(32) null,   
+                                                    phone varchar(50) null,
+                                                    postcode varchar(12) null,
+                                                    communite_addr varchar(200) null,
+                                                    pin_no varchar(200) null,
+                                                    trans_note varchar(200) null,
+                                                    typename_a varchar(32) null,
+                                                    typename_b varchar(32) null,
+                                                    sal_customer_no varchar(10) null,   --提货客户代码
+                                                    station_no varchar(12) null,        --车站代码
+                                                    bill_type varchar(12) null,
+                                                    lun_month integer null,
+                                                    lun_sort integer null,
+                                                    sal_customer_name varchar(100) null, --提货客户
+						    request_deliver_date date,
+						    city varchar(30) ,
+						    street varchar(50),
+						    series_no integer null,
+						    need_pin integer,
+						    best_dunwei numeric(20,2),
+						    place_code varchar(10),
+						     pin_order varchar(50),
+						     pin_number integer,
+						     distance  numeric(20,2),
+						    pianqu  varchar(32) null,
+						    aufsd varchar(10) null           --冻结状态
+						 		
+                                                    )ON COMMIT DROP; 
+END IF;
+
+PERFORM schemaname FROM pg_stat_user_tables where relname ='t_order_notsend_ddd';
+
+IF NOT FOUND THEN
+   create local TEMPORARY table t_order_notsend_ddd(
+                                                    order_no integer null,              --订单号
+                                                    order_itemno integer null,          --订单项目号
+                                                    outware_sheet_no varchar(20) null,  --交货单号
+                                                    sheet_item_no integer null,         --交货单项目号
+                                                    customer_no varchar(10) null,       --客户代码
+                                                    customer_name varchar(200) null,    --客户名称
+                                                    mtrl_no varchar(10) null,           --产品代码
+                                                    materialname varchar(100) null,     --产品名称
+                                                    plan_integer numeric(20,8) null,    --订单数量
+                                                    about_deliver_date timestamp null,  --订单排货日期
+                                                    market_deliver_day timestamp null,  --市场排货日期
+                                                    ware_no varchar(10) null,           --仓库代码
+                                                    ware_name varchar(100) null,        --仓库名称
+                                                    plan_time timestamp null,           --报站时间
+                                                    unitweight numeric(20,8) null,
+                                                    plan_weight numeric(20,8) null,
+                                                    trans_way varchar(10) null,         --运输方式
+                                                    deliver_type varchar(20) null,      --发货类型    
+                                                    deliver_note varchar(200) null,     --排货备注   
+                                                    assign_status varchar(10) null,     --排货状态 
+                                                    dispatch_time timestamp null,       --调度时间
+                                                    ship_to_addr varchar(150) null,     --送货地址 goto_addr
+                                                    place_name varchar(100) null,        --地点名称    
+                                                    district_name varchar(50) null,     --地区
+                                                    market varchar(100) null,           --市场
+                                                    case_price numeric(20,8) null,      --价格
+                                                    unit_no varchar(12) null,           --计量单位
+                                                    connector varchar(32) null,   
+                                                    phone varchar(50) null,
+                                                    postcode varchar(12) null,
+                                                    communite_addr varchar(200) null,
+                                                    pin_no varchar(200) null,
+                                                    trans_note varchar(200) null,
+                                                    typename_a varchar(32) null,
+                                                    typename_b varchar(32) null,
+                                                    sal_customer_no varchar(10) null,   --提货客户代码
+                                                    station_no varchar(12) null,        --车站代码
+                                                    bill_type varchar(12) null,
+                                                    lun_month integer null,
+                                                    lun_sort integer null,
+                                                    sal_customer_name varchar(100) null, --提货客户
+                                                    series_no integer null,
+                                                    plan_status varchar(10) null,
+                                                    in_ware varchar(10) null,
+                                                    org_addr varchar(254) null,
+						    request_deliver_date date,
+						    city varchar(30) ,
+						    street varchar(50),
+						    min_date date null,
+						     request_deliver_xun varchar(12) null ,--指定交货时间段	
+						       p_year integer null,
+							p_month integer null,
+							p_xun  varchar(10) null					    						    
+                                                    )ON COMMIT DROP; 
+END IF;
+
+create local TEMPORARY table t12165_order
+(
+        place_code varchar(10),
+	pin_number integer,
+	street_number integer,
+	dunwei numeric(20,2) ,
+	best_dunwei numeric(20,2)
+) ON COMMIT DROP;
+
+create local TEMPORARY table t12165_gb
+( mtrl_no varchar(10) null, --产品代码
+  unit_gb varchar(10) null,
+  unitweight numeric(18,6) null
+)ON COMMIT DROP;
+
+create local TEMPORARY table t12165_ware
+( 
+   departmentid varchar(20),
+	 place_name varchar(30)
+)ON COMMIT DROP;
+
+
+if as_dept <> '0101' then
+
+	insert into t12165_ware
+	select xs_yw_dept_2_deliver.departmentid ,
+				 xs_yw_dept_2_deliver.place_name
+	 from xs_yw_dept_2_deliver
+	 where xs_yw_dept_2_deliver.loc_no like as_dept ;
+ 
+ else
+		insert into t12165_ware
+		select jc_department.departmentid ,
+					 jc_place.place_name
+		 from jc_department,jc_place
+		 where jc_department.placecode =jc_place.place_code and
+		       jc_department.placecode  in('0101','9029');
+ end if;
+
+
+insert into t12165_gb
+select distinct jc_materialunitexchange.materialid,
+       jc_units.unit_gb,
+       jc_materialunitexchange.transweight
+from jc_materialunitexchange,
+      jc_units
+where ( jc_materialunitexchange.unit_no = jc_units.unit_no ) ;
+    
+
+
+
+--修改问题：索引日期选择项中的“销售调度日期”改为“指定发货日期”，且若选择指定发货日期查询时，按照“指定发货日期”与“建议发货日期”取小索引显示
+insert into t_order_notsend_ddd
+  (order_no,order_itemno,outware_sheet_no,sheet_item_no,customer_no,customer_name,mtrl_no,plan_integer,about_deliver_date,market_deliver_day,ware_no,
+   plan_time,trans_way,deliver_type,deliver_note,assign_status,dispatch_time,place_name,market,case_price,unit_no,pin_no,bill_type,series_no,plan_status,
+   lun_month,lun_sort,request_deliver_date,city,street,min_date,request_deliver_xun,p_year,p_month,p_xun)
+  select xs_yw_sale_order_info.order_no,   
+       xs_yw_sale_order_info.order_itemno,   
+       xs_yw_sale_order_info.outware_sheet_no,   
+       xs_yw_sale_order_info.sheet_item_no,   
+       xs_yw_sale_order_info.customer_no,   
+       xs_yw_sale_order_info.customer_name,
+       xs_yw_sale_order_info.mtrl_no,   
+       xs_yw_sale_order_info.plan_integer,   
+       xs_yw_sale_order_info.about_deliver_date,   
+       xs_yw_sale_order_info.market_deliver_day,   
+       xs_yw_sale_order_info.ware_no, 
+       xs_yw_sale_order_info.plan_time,   
+       xs_yw_sale_order_info.trans_way,
+       xs_yw_sale_order_info.deliver_type,
+      substring( xs_yw_sale_order_info.deliver_note,1,200),
+       xs_yw_sale_order_info.assign_status,
+       xs_yw_sale_order_info.dispatch_time,
+       t12165_ware.place_name,
+       xs_yw_sale_order_info.market,
+       xs_yw_sale_order_info.case_price,
+       xs_yw_sale_order_info.unit_no,
+       xs_yw_sale_order_info.pin_no,
+       '销售',
+       xs_yw_sale_order_info.series_no,
+       xs_yw_sale_order_info.plan_status,
+       xs_yw_sale_order_info.lun_month,
+       xs_yw_sale_order_info.lun_sort,
+       xs_yw_sale_order_info.request_deliver_date,
+       xs_yw_sale_order_info.city_no,
+       xs_yw_sale_order_info.street_no,
+       xs_yw_sale_order_info.request_deliver_date,
+       xs_yw_sale_order_info.p_month||'月'||xs_yw_sale_order_info.p_xun,
+       xs_yw_sale_order_info.p_year,
+       xs_yw_sale_order_info.p_month,
+       xs_yw_sale_order_info.p_xun
+  from xs_yw_sale_order_info,   
+       t12165_ware
+ where ( xs_yw_sale_order_info.ware_no = t12165_ware.departmentid ) and  
+        xs_yw_sale_order_info.request_deliver_date <= xs_yw_sale_order_info.about_deliver_date and
+       ( xs_yw_sale_order_info.request_deliver_date >= adt_x_from ) and
+       ( xs_yw_sale_order_info.request_deliver_date < (adt_x_to + interval '1 day') ) and
+       ( xs_yw_sale_order_info.plan_status in ('打印出库单', '调度') ) and
+       ( xs_yw_sale_order_info.about_deliver_date < (adt_p_to + interval '1 day') ) and
+       ( xs_yw_sale_order_info.about_deliver_date >= adt_p_from ) and
+       ( xs_yw_sale_order_info.plan_integer > 0 ) ;
+
+
+insert into t_order_notsend_ddd
+  (order_no,order_itemno,outware_sheet_no,sheet_item_no,customer_no,customer_name,mtrl_no,plan_integer,about_deliver_date,market_deliver_day,ware_no,
+   plan_time,trans_way,deliver_type,deliver_note,assign_status,dispatch_time,place_name,market,case_price,unit_no,pin_no,bill_type,series_no,plan_status,
+   lun_month,lun_sort,request_deliver_date,city,street,min_date,request_deliver_xun,p_year,p_month,p_xun)
+  select xs_yw_sale_order_info.order_no,   
+       xs_yw_sale_order_info.order_itemno,   
+       xs_yw_sale_order_info.outware_sheet_no,   
+       xs_yw_sale_order_info.sheet_item_no,   
+       xs_yw_sale_order_info.customer_no,   
+       xs_yw_sale_order_info.customer_name,
+       xs_yw_sale_order_info.mtrl_no,   
+       xs_yw_sale_order_info.plan_integer,   
+       xs_yw_sale_order_info.about_deliver_date,   
+       xs_yw_sale_order_info.market_deliver_day,   
+       xs_yw_sale_order_info.ware_no, 
+       xs_yw_sale_order_info.plan_time,   
+       xs_yw_sale_order_info.trans_way,
+       xs_yw_sale_order_info.deliver_type,
+     substring( xs_yw_sale_order_info.deliver_note,1,200),
+       xs_yw_sale_order_info.assign_status,
+       xs_yw_sale_order_info.dispatch_time,
+       t12165_ware.place_name,
+       xs_yw_sale_order_info.market,
+       xs_yw_sale_order_info.case_price,
+       xs_yw_sale_order_info.unit_no,
+       xs_yw_sale_order_info.pin_no,
+       '销售',
+       xs_yw_sale_order_info.series_no,
+       xs_yw_sale_order_info.plan_status,
+       xs_yw_sale_order_info.lun_month,
+       xs_yw_sale_order_info.lun_sort,
+       xs_yw_sale_order_info.request_deliver_date,
+       xs_yw_sale_order_info.city_no,
+       xs_yw_sale_order_info.street_no,
+       xs_yw_sale_order_info.about_deliver_date,
+        xs_yw_sale_order_info.p_month||'月'||xs_yw_sale_order_info.p_xun,
+         xs_yw_sale_order_info.p_year,
+       xs_yw_sale_order_info.p_month,
+       xs_yw_sale_order_info.p_xun
+  from xs_yw_sale_order_info,   
+       t12165_ware
+ where ( xs_yw_sale_order_info.ware_no = t12165_ware.departmentid ) and  
+        xs_yw_sale_order_info.request_deliver_date > xs_yw_sale_order_info.about_deliver_date and
+       ( xs_yw_sale_order_info.about_deliver_date >= adt_x_from ) and
+       ( xs_yw_sale_order_info.about_deliver_date < (adt_x_to + interval '1 day') ) and
+       ( xs_yw_sale_order_info.plan_status in ('打印出库单', '调度') ) and
+       ( xs_yw_sale_order_info.about_deliver_date < (adt_p_to + interval '1 day') ) and
+       ( xs_yw_sale_order_info.about_deliver_date >= adt_p_from ) and
+       ( xs_yw_sale_order_info.plan_integer > 0 ) ;
+
+
+       
+
+
+insert into t_order_notsend_ddd
+  (order_no,order_itemno,outware_sheet_no,sheet_item_no,in_ware,mtrl_no,plan_integer,about_deliver_date,market_deliver_day,ware_no,plan_time,
+   trans_way,deliver_note,assign_status,org_addr,place_name,market,unit_no,connector,phone,bill_type,series_no,plan_status,request_deliver_date,request_deliver_xun,p_year,p_month,p_xun)
+select xs_yw_yk_order_info.order_no,   
+       xs_yw_yk_order_info.order_itemno,   
+       xs_yw_yk_order_info.outware_sheet_no,   
+       xs_yw_yk_order_info.item_no, 
+       xs_yw_yk_order_info.in_ware, 
+       xs_yw_yk_order_info.mtrl_no,   
+       xs_yw_yk_order_info.plan_integer,   
+       xs_yw_yk_order_info.about_deliver_date,   
+       xs_yw_yk_order_info.market_deliver_day,   
+       xs_yw_yk_order_info.ware_no,   
+       xs_yw_yk_order_info.plan_time,   
+       xs_yw_yk_order_info.trans_way,
+       xs_yw_yk_order_info.deliver_note, 
+       xs_yw_yk_order_info.assign_status,
+       xs_yw_yk_order_info.org_addr,
+       t12165_ware.place_name, 
+       xs_yw_yk_order_info.market, 
+       xs_yw_yk_order_info.unit_no,
+       xs_yw_yk_order_info.connector,   
+       xs_yw_yk_order_info.phone,
+       '移库',
+       xs_yw_yk_order_info.series_no,
+       xs_yw_yk_order_info.plan_status,
+       xs_yw_yk_order_info.request_deliver_date,
+       '',0,0,''
+  from xs_yw_yk_order_info,   
+       t12165_ware
+ where ( xs_yw_yk_order_info.ware_no = t12165_ware.departmentid ) and  
+       ( xs_yw_yk_order_info.plan_time >= (current_timestamp - interval '8 month') ) and
+       ( xs_yw_yk_order_info.plan_status in ('打印出库单', '调度') ) and
+       ( xs_yw_yk_order_info.plan_integer > 0 ) ;
+
+
+
+
+
+
+
+
+
+insert into t_order_notsend_all(order_no ,order_itemno ,outware_sheet_no ,sheet_item_no ,customer_no ,
+                                customer_name ,mtrl_no ,materialname ,plan_integer ,about_deliver_date ,
+                                market_deliver_day ,ware_no ,ware_name ,plan_time , unitweight ,plan_weight ,
+                                trans_way,deliver_type , deliver_note , assign_status ,dispatch_time ,
+                                ship_to_addr ,place_name ,district_name ,market ,case_price ,unit_no ,
+                                connector ,phone , postcode ,communite_addr ,pin_no ,trans_note , typename_a ,
+                                typename_b ,sal_customer_no ,station_no ,bill_type ,lun_month ,lun_sort ,
+                                sal_customer_name ,request_deliver_date , city ,street ,series_no ,obj_properties,request_deliver_xun,p_year,p_month,p_xun )
+select t_order_notsend_ddd.order_no,   
+       t_order_notsend_ddd.order_itemno,   
+       t_order_notsend_ddd.outware_sheet_no,   
+       t_order_notsend_ddd.sheet_item_no,   
+       t_order_notsend_ddd.customer_no,   
+       t_order_notsend_ddd.customer_name,
+       t_order_notsend_ddd.mtrl_no,   
+       jc_material.materialname,   
+       t_order_notsend_ddd.plan_integer,   
+       t_order_notsend_ddd.about_deliver_date,   
+       t_order_notsend_ddd.market_deliver_day,   
+       t_order_notsend_ddd.ware_no,   
+       innerentity_b.entityname,   
+       t_order_notsend_ddd.plan_time,   
+       t12165_gb.unitweight,   
+       (t_order_notsend_ddd.plan_integer * t12165_gb.unitweight/1000) as plan_weight,
+       t_order_notsend_ddd.trans_way,
+       t_order_notsend_ddd.deliver_type,
+       t_order_notsend_ddd.deliver_note,
+       t_order_notsend_ddd.assign_status,
+       t_order_notsend_ddd.dispatch_time,
+       jc_customer_tostation.goto_addr,
+       t_order_notsend_ddd.place_name,
+       district.departmentname,   
+       t_order_notsend_ddd.market,
+       t_order_notsend_ddd.case_price,
+       t_order_notsend_ddd.unit_no,
+       sale_cus_a.connector,   
+       sale_cus_a.phone,
+       sale_cus_a.postcode,
+       sale_cus_a.communite_addr as communite_addr,
+       t_order_notsend_ddd.pin_no,
+       sale_cus_b.trans_note,
+       '' as material_a_typename,
+       '' as material_b_typename,
+       jc_customer_tostation.sal_customer_no,
+       jc_customer_tostation.station_no,
+       t_order_notsend_ddd.bill_type,
+       t_order_notsend_ddd.lun_month,t_order_notsend_ddd.lun_sort,
+       sale_cus_b.customer_name,
+       t_order_notsend_ddd.request_deliver_date,
+       t_order_notsend_ddd.city,
+       t_order_notsend_ddd.street,
+       t_order_notsend_ddd.series_no,
+       jc_customer_tostation.obj_properties,
+       t_order_notsend_ddd.request_deliver_xun,
+       t_order_notsend_ddd.p_year,t_order_notsend_ddd.p_month,t_order_notsend_ddd.p_xun
+  from t_order_notsend_ddd,   
+       jc_innerentity innerentity_b,   
+       jc_customer_tostation,
+       jc_sale_customer sale_cus_b,
+       t12165_gb,       
+       jc_department district,   
+       jc_sale_customer sale_cus_a, 
+       jc_material
+ where ( sale_cus_a.district_no = district.departmentid ) and
+       ( t_order_notsend_ddd.customer_no = sale_cus_a.customer_no ) and  
+       ( jc_customer_tostation.customer_no = t_order_notsend_ddd.customer_no ) and
+       ( jc_customer_tostation.series_no = t_order_notsend_ddd.series_no ) and
+       ( jc_customer_tostation.use_dept = 'bm3318' ) and
+       ( jc_material.materialid = t_order_notsend_ddd.mtrl_no ) and  
+       ( innerentity_b.entityid = t_order_notsend_ddd.ware_no ) and  
+       ( t_order_notsend_ddd.mtrl_no = t12165_gb.mtrl_no ) and  
+       ( t_order_notsend_ddd.unit_no = t12165_gb.unit_gb ) and
+       ( t_order_notsend_ddd.min_date >= adt_x_from ) and
+       ( t_order_notsend_ddd.min_date < (adt_x_to + interval '1 day') ) and
+       ( t_order_notsend_ddd.plan_status in ('打印出库单', '调度') ) and
+       ( t_order_notsend_ddd.about_deliver_date < (adt_p_to + interval '1 day') ) and
+       ( t_order_notsend_ddd.about_deliver_date >= adt_p_from ) and
+       ( t_order_notsend_ddd.plan_integer > 0 ) and
+       ( jc_customer_tostation.sal_customer_no = sale_cus_b.customer_no ) and
+       ( t_order_notsend_ddd.bill_type = '销售');   
+    
+
+insert into t_order_notsend_all(order_no ,order_itemno ,outware_sheet_no ,sheet_item_no ,customer_no ,
+                                customer_name ,mtrl_no ,materialname ,plan_integer ,about_deliver_date ,
+                                market_deliver_day ,ware_no ,ware_name ,plan_time , unitweight ,plan_weight ,
+                                trans_way,deliver_type , deliver_note , assign_status ,dispatch_time ,
+                                ship_to_addr ,place_name ,district_name ,market ,case_price ,unit_no ,
+                                connector ,phone , postcode ,communite_addr ,pin_no ,trans_note , typename_a ,
+                                typename_b ,sal_customer_no ,station_no ,bill_type ,lun_month ,lun_sort ,
+                                sal_customer_name ,request_deliver_date , city ,street ,series_no ,obj_properties ,request_deliver_xun,p_year,p_month,p_xun )
+select t_order_notsend_ddd.order_no,   
+       t_order_notsend_ddd.order_itemno,   
+       t_order_notsend_ddd.outware_sheet_no,   
+       t_order_notsend_ddd.sheet_item_no,  
+       t_order_notsend_ddd.in_ware, 
+       innerentity_a.entityname,   
+       t_order_notsend_ddd.mtrl_no,   
+       jc_material.materialname,   
+       t_order_notsend_ddd.plan_integer,   
+       t_order_notsend_ddd.about_deliver_date,   
+       t_order_notsend_ddd.about_deliver_date,   
+       t_order_notsend_ddd.ware_no,   
+       innerentity_b.entityname,   
+       t_order_notsend_ddd.plan_time,   
+       t12165_gb.unitweight,   
+       (t_order_notsend_ddd.plan_integer * t12165_gb.unitweight/1000) as plan_weight,
+       t_order_notsend_ddd.trans_way,
+       '', 
+       t_order_notsend_ddd.deliver_note, 
+       coalesce(t_order_notsend_ddd.assign_status, ''),
+       t_order_notsend_ddd.plan_time, 
+       t_order_notsend_ddd.org_addr,
+       t_order_notsend_ddd.place_name, 
+       '', 
+       t_order_notsend_ddd.market, 
+       0, 
+       t_order_notsend_ddd.unit_no,
+       t_order_notsend_ddd.connector,   
+       t_order_notsend_ddd.phone,
+       '' as org_postcode,
+       t_order_notsend_ddd.org_addr,
+       '', 
+       jc_sale_customer.trans_note,
+       '' as material_a_typename,
+       '' as material_b_typename,
+       jc_customer_tostation.sal_customer_no,
+       jc_customer_tostation.station_no,
+       t_order_notsend_ddd.bill_type,null,null,
+       jc_sale_customer.customer_name,
+       t_order_notsend_ddd.request_deliver_date,
+       t_order_notsend_ddd.city,
+       t_order_notsend_ddd.street,
+       t_order_notsend_ddd.series_no,
+       jc_customer_tostation.obj_properties,
+       t_order_notsend_ddd.request_deliver_xun,
+        t_order_notsend_ddd.p_year,t_order_notsend_ddd.p_month,t_order_notsend_ddd.p_xun
+  from jc_innerentity innerentity_a,      
+       t_order_notsend_ddd,   
+       jc_innerentity innerentity_b,   
+       t12165_gb,      
+       jc_customer_tostation,
+       jc_sale_customer,  
+       jc_material
+ where ( jc_material.materialid = t_order_notsend_ddd.mtrl_no ) and  
+       ( innerentity_a.entityid = t_order_notsend_ddd.in_ware ) and  
+       ( innerentity_b.entityid = t_order_notsend_ddd.ware_no ) and  
+       ( t_order_notsend_ddd.mtrl_no = t12165_gb.mtrl_no ) and  
+       ( t_order_notsend_ddd.unit_no = t12165_gb.unit_gb ) and
+       ( jc_customer_tostation.series_no = t_order_notsend_ddd.series_no ) and
+       ( t_order_notsend_ddd.plan_time >= (current_timestamp - interval '8 month') ) and
+       ( t_order_notsend_ddd.plan_status in ('打印出库单', '调度') ) and
+       ( t_order_notsend_ddd.plan_integer > 0 ) and
+       ( jc_customer_tostation.sal_customer_no = jc_sale_customer.customer_no ) and
+       ( jc_customer_tostation.use_dept = 'bm3318' ) and
+       ( t_order_notsend_ddd.bill_type = '移库');   
+
+
+
+--ship_to_addr  deliver_note
+update t_order_notsend_all
+   set ship_to_addr = t_order_notsend_all.ship_to_addr || '**' || jc_sale_station.station_name
+  from jc_sale_station
+ where ( jc_sale_station.station_no = t_order_notsend_all.station_no ) and
+       ( t_order_notsend_all.bill_type = '销售' ) and
+       ( t_order_notsend_all.trans_way = '铁路' );
+
+update t_order_notsend_all
+   set deliver_note = jc_sale_station.station_name || '**'
+  from jc_sale_station
+ where ( jc_sale_station.station_no = t_order_notsend_all.station_no ) and
+       ( t_order_notsend_all.bill_type = '移库' ) and
+       ( t_order_notsend_all.trans_way = '铁路' );
+
+update t_order_notsend_all
+   set deliver_note = deliver_note || jc_sale_customer.customer_name || '**' || jc_sale_customer.fax_no
+  from jc_sale_customer 
+ where ( jc_sale_customer.customer_no = t_order_notsend_all.sal_customer_no ) and
+       ( t_order_notsend_all.bill_type = '移库' ) and
+       ( t_order_notsend_all.trans_way = '铁路' );
+
+--大类typename_a 小类typename_b
+update t_order_notsend_all
+   set typename_a = xs_jc_materialascription.typename
+  from xs_jc_materialascription
+ where ( t_order_notsend_all.mtrl_no = xs_jc_materialascription.materialid ) and
+       ( xs_jc_materialascription.classname = '产品产能分类' ) and  
+       ( xs_jc_materialascription.rank = 1 );
+
+update t_order_notsend_all
+   set typename_b = xs_jc_materialascription.typename
+  from xs_jc_materialascription
+ where ( t_order_notsend_all.mtrl_no = xs_jc_materialascription.materialid ) and
+       ( xs_jc_materialascription.classname = '产品产能分类' ) and  
+       ( xs_jc_materialascription.rank = 2 );
+
+
+
+--计算平车号
+if as_compute ='计算' then
+	update t_order_notsend_all
+	set place_code = xs_yw_dept_2_deliver.loc_no
+	from xs_yw_dept_2_deliver
+	where t_order_notsend_all.ware_no = xs_yw_dept_2_deliver.departmentid ;
+
+	create index sub_place on t_order_notsend_all (place_code,pin_number);
+
+	create index sub_request_date on t_order_notsend_all (place_code,pin_number);
+
+	--客户指定日期过期，直接默认成今天
+	update t_order_notsend_all
+	set  need_pin =1
+	where bill_type = '销售' and trans_way = '公路' and
+	      city is not null;
+	      
+	update t_order_notsend_all
+	set request_deliver_date = current_date 
+	where need_pin = 1 and
+	      request_deliver_date < current_date ; 
+	      
+
+	update t_order_notsend_all
+	set distance = xs_jc_sale_city_place.distance,
+	    best_dunwei = coalesce(xs_jc_sale_city_place.best_deliverton,0)
+	from xs_jc_sale_city_place
+	where t_order_notsend_all.city = xs_jc_sale_city_place.city_no and
+	      xs_jc_sale_city_place.place_code = t_order_notsend_all.place_code and
+	      t_order_notsend_all.need_pin = 1 ;
+	for rs_place in select distinct place_code from t_order_notsend_all
+	where need_pin = 1 
+	loop
+		insert into t_order_notsend_t(order_no ,order_itemno ,outware_sheet_no ,sheet_item_no ,customer_no ,
+                                customer_name ,mtrl_no ,materialname ,plan_integer ,about_deliver_date ,
+                                market_deliver_day ,ware_no ,ware_name ,plan_time , unitweight ,plan_weight ,
+                                trans_way,deliver_type , deliver_note , assign_status ,dispatch_time ,
+                                ship_to_addr ,place_name ,district_name ,market ,case_price ,unit_no ,
+                                connector ,phone , postcode ,communite_addr ,pin_no ,trans_note , typename_a ,
+                                typename_b ,sal_customer_no ,station_no ,bill_type ,lun_month ,lun_sort ,
+                                sal_customer_name ,request_deliver_date , city ,street ,series_no ,need_pin,best_dunwei,place_code, 
+				pin_order,pin_number,distance,pianqu,aufsd)
+
+		select order_no ,order_itemno ,outware_sheet_no ,sheet_item_no ,customer_no ,
+                                customer_name ,mtrl_no ,materialname ,plan_integer ,about_deliver_date ,
+                                market_deliver_day ,ware_no ,ware_name ,plan_time , unitweight ,plan_weight ,
+                                trans_way,deliver_type , deliver_note , assign_status ,dispatch_time ,
+                                ship_to_addr ,place_name ,district_name ,market ,case_price ,unit_no ,
+                                connector ,phone , postcode ,communite_addr ,pin_no ,trans_note , typename_a ,
+                                typename_b ,sal_customer_no ,station_no ,bill_type ,lun_month ,lun_sort ,
+                                sal_customer_name ,request_deliver_date , city ,street ,series_no ,need_pin,best_dunwei,place_code, 
+				pin_order,pin_number,distance,pianqu,aufsd from t_order_notsend_all 
+		where place_code = rs_place.place_code and
+		      need_pin = 1 ;
+		ll_serial =0 ; --车号清空
+		raise notice '%  % ',rs_place.place_code,clock_timestamp();
+		loop
+			-- 找出最远县级 销售订单和公路的订单参与排序
+			select count(1) into ll_count 
+			from t_order_notsend_t
+			where 
+			      pin_number is null and
+			      city is not null  ;
+
+
+			if ll_count =0 then 
+				exit;
+			end if;
+			ll_serial =ll_serial +1;
+		
+			select order_no,order_itemno ,series_no,request_deliver_date,
+			       best_dunwei,street
+			into ll_order_no,ll_order_itemno,ll_series_no,ldt_request_date,
+			     ldec_best,ls_street
+			from t_order_notsend_t 
+			where 
+			      pin_number is null  
+			order by distance desc,city,plan_time,order_no,order_itemno
+			limit 1;
+
+			update t_order_notsend_t
+			set pin_number = ll_serial
+			where 
+			      pin_number is null  and
+			      series_no = ll_series_no and
+			     ( request_deliver_date >= ldt_request_date -  interval '1 day'  and
+			      request_deliver_date <= ldt_request_date +  interval '1 day'  ) ;
+		       
+			select sum(plan_weight) :: numeric(20,2) into ldec_dunwei
+			from t_order_notsend_t
+			where  pin_number = ll_serial ;
+			
+			--满足则继续
+			if ldec_dunwei >= ldec_best then
+			   continue;
+			end if;
+		       
+			update t_order_notsend_t
+			set pin_number = ll_serial
+			where 
+			      pin_number is null  and
+			      street = ls_street and
+			     ( request_deliver_date >= ldt_request_date -  interval '1 day' and
+			      request_deliver_date <= ldt_request_date +  interval '1 day'  ) ;
+			
+			select sum(plan_weight) :: numeric(20,2) into ldec_dunwei
+			from t_order_notsend_t
+			where  pin_number = ll_serial ; 
+			
+			--满足则继续
+			if ldec_dunwei >= ldec_best then
+			   continue;
+			end if;
+			
+			if exists (select 1 from t_order_notsend_t 
+				   where need_pin = 1 and
+					 order_no = ll_order_no and
+					 street <> ls_street ) then
+				for rs in select series_no from t_order_notsend_t
+					  where order_no = ll_order_no and
+						 street <> ls_street and
+						 pin_number is null  
+				order by order_itemno
+				loop 
+					update t_order_notsend_t
+					set pin_number = ll_serial
+					where 
+					      pin_number is null  and
+					      series_no = rs.series_no and
+					     ( request_deliver_date >= ldt_request_date -  interval '1 day'  and
+					      request_deliver_date <= ldt_request_date +  interval '1 day'  ) ;
+					
+				end loop ;
+
+				select sum(plan_weight) :: numeric(20,2) into ldec_dunwei
+				from t_order_notsend_t
+				where  pin_number = ll_serial ; 
+				
+				--满足则继续
+				if ldec_dunwei >= ldec_best then
+				   continue;
+				end if;
+
+				for rs in select street from t_order_notsend_t
+					  where order_no = ll_order_no and
+						 street <> ls_street and
+						 pin_number is null  
+				order by order_itemno
+				loop 
+					update t_order_notsend_t
+					set pin_number = ll_serial
+					where 
+					      pin_number is null  and
+					      street = rs.street and
+					     ( request_deliver_date >= ldt_request_date -  interval '1 day'  and 
+					      request_deliver_date <= ldt_request_date +  interval '1 day'  ) ;
+					
+				end loop ;
+				
+			else
+				for rs in select  pinche_town  from xs_jc_place_deli_town
+					where  place_code =rs_place.place_code   and
+					       deli_townno = ls_street  
+					order by  pinche_xuhao 
+				loop 
+					update t_order_notsend_t
+					set pin_number = ll_serial
+					where 
+					      pin_number is null  and
+					      street = rs.pinche_town and
+					     ( request_deliver_date >= ldt_request_date -  interval '1 day'  and 
+					      request_deliver_date <= ldt_request_date +  interval '1 day'  ) ;
+					select sum(plan_weight) :: numeric(20,2) into ldec_dunwei
+					from t_order_notsend_t
+					where  pin_number = ll_serial ;
+					
+					--满足则继续
+					if ldec_dunwei >= ldec_best then
+					   exit;
+					end if;
+				end loop  ;
+			end if;
+		end loop ;
+		update t_order_notsend_all
+		set pin_number = t_order_notsend_t.pin_number
+		from t_order_notsend_t
+		where t_order_notsend_all.order_no = t_order_notsend_t.order_no and
+		      t_order_notsend_all.order_itemno = t_order_notsend_t.order_itemno ;
+		 truncate table t_order_notsend_t ; 
+	end loop;
+
+	insert into t12165_order(place_code,pin_number,street_number,dunwei,best_dunwei)
+	select place_code,pin_number ,count(distinct street),sum(plan_weight),min(best_dunwei)
+	from t_order_notsend_all
+	where pin_number is not null
+	group by place_code,pin_number ; 
+
+
+	update t_order_notsend_all
+	set pin_order = pin_number
+	where pin_number is not null ;
+
+	update t_order_notsend_all
+	set pin_order = pin_order  || '-'||'整'
+	from t12165_order
+	where t12165_order.pin_number = t_order_notsend_all.pin_number and
+              t12165_order.place_code = t_order_notsend_all.place_code and
+	      t12165_order.street_number = 1;
+
+	update t_order_notsend_all
+	set pin_order = pin_order  || '-'||'拼'
+	from t12165_order
+	where t12165_order.pin_number = t_order_notsend_all.pin_number and
+              t12165_order.place_code = t_order_notsend_all.place_code and
+	      t12165_order.street_number > 1;      
+
+	update t_order_notsend_all
+	set pin_order = pin_order  || '-'||'足'
+	from t12165_order
+	where t12165_order.pin_number = t_order_notsend_all.pin_number and
+              t12165_order.place_code = t_order_notsend_all.place_code and
+	      t12165_order.dunwei > t12165_order.best_dunwei;
+
+	update t_order_notsend_all
+	set pin_order = pin_order  || '-'||'缺'
+	from t12165_order
+	where t12165_order.pin_number = t_order_notsend_all.pin_number and
+              t12165_order.place_code = t_order_notsend_all.place_code and
+	      t12165_order.dunwei < t12165_order.best_dunwei;   
+end if;
+
+update t_order_notsend_all
+set request_deliver_date = xs_yw_sale_order_info.request_deliver_date
+from xs_yw_sale_order_info
+where xs_yw_sale_order_info.order_no =  t_order_notsend_all.order_no and  
+       xs_yw_sale_order_info.order_itemno = t_order_notsend_all.order_itemno ;
+
+update t_order_notsend_all
+set request_deliver_date = xs_yw_yk_order_info.request_deliver_date
+from xs_yw_yk_order_info
+where xs_yw_yk_order_info.order_no =  t_order_notsend_all.order_no and  
+       xs_yw_yk_order_info.order_itemno = t_order_notsend_all.order_itemno ;
+
+
+update t_order_notsend_all
+set pianqu = jc_department.departmentname 
+from  jc_rankdiagram,   
+      jc_department, jc_higherdepartment
+where t_order_notsend_all.ware_no = jc_higherdepartment.departmentid and
+        jc_higherdepartment.ancientid  =   jc_rankdiagram.departmentid  and
+        ( jc_rankdiagram.parentid = jc_department.departmentid ) and  
+         (  jc_rankdiagram.ranktype = '生产组织' ) AND  
+         ( jc_rankdiagram.rankid = 30  ) and
+          ( jc_higherdepartment.ranktype = '行政' ) AND  
+         ( jc_higherdepartment.ancientrankid = 20 ) ;
+
+  --更新 冻结 状态-----------------------------------------------
+  update t_order_notsend_all          
+  set aufsd = xs_yw_xdd_aufsd_order.d_status
+  from xs_yw_xdd_aufsd_order
+  where t_order_notsend_all.order_no = xs_yw_xdd_aufsd_order.order_no and
+	t_order_notsend_all.bill_type = '销售' and
+        xs_yw_xdd_aufsd_order.group_name = '小调度' and
+        xs_yw_xdd_aufsd_order.order_type = '销售订单' ;
+
+
+
+
+update t_order_notsend_all set request_deliver_xun = request_deliver_xun||xs_jc_order_xun_date.note
+from xs_jc_order_xun_date
+where t_order_notsend_all.p_year = xs_jc_order_xun_date.p_year and
+      t_order_notsend_all.p_month = xs_jc_order_xun_date.p_month and
+      t_order_notsend_all.p_xun = xs_jc_order_xun_date.functionname and
+      xs_jc_order_xun_date.functionmodule = '报站自然旬';
+
+
+
+
+
+
+for rs in execute 'select t_order_notsend_all.order_no,
+       t_order_notsend_all.order_itemno,
+       cast(t_order_notsend_all.outware_sheet_no as integer),
+       t_order_notsend_all.sheet_item_no,
+       t_order_notsend_all.customer_no,
+       t_order_notsend_all.customer_name,
+       t_order_notsend_all.mtrl_no,
+       t_order_notsend_all.materialname,
+       t_order_notsend_all.plan_integer,
+       t_order_notsend_all.about_deliver_date,
+       t_order_notsend_all.market_deliver_day,
+       t_order_notsend_all.ware_no,
+       t_order_notsend_all.ware_name,
+       t_order_notsend_all.plan_time,
+       t_order_notsend_all.unitweight,
+       t_order_notsend_all.plan_weight,
+       t_order_notsend_all.trans_way,
+       t_order_notsend_all.deliver_type,
+       t_order_notsend_all.deliver_note,
+       t_order_notsend_all.assign_status,
+       t_order_notsend_all.dispatch_time,
+       t_order_notsend_all.ship_to_addr,
+       t_order_notsend_all.place_name,
+       t_order_notsend_all.district_name,
+       t_order_notsend_all.market,
+       t_order_notsend_all.case_price,
+       t_order_notsend_all.unit_no,
+       t_order_notsend_all.connector,
+       t_order_notsend_all.phone,
+       t_order_notsend_all.postcode,
+       t_order_notsend_all.communite_addr,
+       t_order_notsend_all.pin_no,
+       t_order_notsend_all.trans_note,
+       t_order_notsend_all.typename_a,
+       t_order_notsend_all.typename_b,
+       t_order_notsend_all.lun_month,
+       t_order_notsend_all.lun_sort,
+       t_order_notsend_all.sal_customer_no,
+       t_order_notsend_all.sal_customer_name,
+       t_order_notsend_all.pin_order,
+       t_order_notsend_all.request_deliver_date,
+       t_order_notsend_all.pianqu,
+       t_order_notsend_all.aufsd,
+       t_order_notsend_all.obj_properties,
+       t_order_notsend_all.request_deliver_xun
+  from t_order_notsend_all '
+    loop 
+	return next rs ;
+    end loop;
+
+--插入到函数执行记录表中
+insert into jc_proc_task
+  (begin_time,end_time,proc_name,func_name,oper_man,para_value,note)
+  values (CURRENT_TIMESTAMP , timeofday() :: TIMESTAMP , current_query(), '','','','');
+
+end$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100
+  ROWS 1000

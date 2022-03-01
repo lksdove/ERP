@@ -1,0 +1,528 @@
+CREATE OR REPLACE FUNCTION public.proc_query_deliver_data_single_cl(as_place varchar, ad_date_start timestamp, ad_date_end timestamp)
+  RETURNS SETOF pg_catalog.record AS $BODY$
+
+declare rs record;
+
+begin
+
+--检查临时表是否存在
+--建临时表
+PERFORM schemaname FROM pg_stat_user_tables where relname ='t_query_deliver_data_single';
+IF NOT FOUND THEN
+   create local TEMPORARY table t_query_deliver_data_single(
+                                                            order_no integer null,              --订单号
+                                                            order_itemno integer null,          --订单项目号
+                                                            outware_sheet_no varchar(20) null,  --交货单号
+                                                            sheet_item_no integer null,         --交货单项目号
+                                                            customer_no varchar(10) null,       --客户代码
+                                                            customer_name varchar(200) null,    --客户名称
+                                                            mtrl_no varchar(10) null,           --产品代码
+                                                            materialname varchar(100) null,     --产品名称
+                                                            plan_integer numeric(20,8) null,    --订单数量
+                                                            trans_way varchar(10) null,         --运输方式
+                                                            ware_no varchar(10) null,           --仓库代码
+                                                            ware_name varchar(200) null,        --仓库名称
+                                                            about_deliver_date timestamp null,  --订单排货日期
+                                                            dept_deliver_date timestamp null,   --分厂排货日期
+                                                            market_deliver_day timestamp null,  --市场排货日期
+                                                            deliver_status varchar(12) null,    --排货状态
+                                                            ship_to_addr varchar(150) null,     --送货地址
+                                                            deliver_note varchar(200) null,     --排货备注
+                                                            unitweight numeric(18,6) null,      --单位重量
+                                                            deliver_date timestamp null,        --发货日期
+                                                            deliver_integer numeric(20,8) null, --发货数量
+                                                            supplier_name varchar(200) null,    --托运单位
+                                                            contact varchar(20) null,           --联系人
+                                                            telephone varchar(30) null,         --联系电话
+                                                            cus_confirm_num numeric(20,8) null, --收货数量
+                                                            cus_confirm_date timestamp null,    --收货时间
+                                                            plan_status varchar(10) null,       --计划状态
+                                                            district_name varchar(200) null,    --地区
+                                                            area_name varchar(200) null,        --市场
+                                                            case_price numeric(20,8) null,      --价格
+                                                            common_day integer null,
+                                                            mileage numeric(10,2) null,         --里程
+                                                            deliver_type varchar(20) null,      --发货类型
+                                                            mtrl_type varchar(32) null,
+                                                            parenttypename varchar(32) null,
+                                                            cus_note varchar(150) null,         --到货纸箱包装反馈
+                                                            vbeln_new varchar(20) null,
+                                                            posnr_new integer null,
+                                                            deliver_note2 varchar(200) null,     --发货备注
+                                                            lun_month int null,
+                                                            lun_sort int null,
+                                                            assign_time timestamp,
+                                                            market_check varchar(50),
+                                                            pianqu  varchar(32) null,
+                                                             place_name varchar(32) null,
+							request_deliver_date  date null,
+                                                        plan_time timestamp null,
+                                                        affirm_time timestamp null ,
+                                                        obj_properties  varchar(30) null,--2016.1.15 c# 已排已发地址属性
+                                                        request_deliver_xun varchar(12),
+                                                         p_year integer null,
+							p_month integer null,
+							p_xun  varchar(10) null
+						            )ON COMMIT DROP; 
+END IF;
+
+if as_place  '%' then
+  insert into t_query_deliver_data_single
+  select xs_yw_dept_deliver_plan.order_no,
+         xs_yw_dept_deliver_plan.order_itemno,
+         xs_yw_dept_deliver_plan.outware_sheet_no,
+         xs_yw_dept_deliver_plan.sheet_item_no,
+         xs_yw_dept_deliver_plan.customer_no,
+         xs_yw_sale_order_info.customer_name,
+         xs_yw_dept_deliver_plan.mtrl_no,
+         jc_material.materialname,
+         xs_yw_dept_deliver_plan.plan_integer,
+         xs_yw_dept_deliver_plan.trans_way,
+         xs_yw_dept_deliver_plan.ware_no,
+         innerentity_b.departmentname entityname,
+         xs_yw_dept_deliver_plan.about_deliver_date,
+         xs_yw_dept_deliver_plan.dept_deliver_date,
+         xs_yw_dept_deliver_plan.market_deliver_day,
+         xs_yw_dept_deliver_plan.deliver_status,
+         xs_yw_dept_deliver_plan.ship_to_addr,
+         xs_yw_dept_deliver_plan.deliver_note,
+         jc_materialunitexchange.transweight,
+         xs_yw_sale_order_info.deliver_date,
+         xs_yw_sale_order_info.deliver_integer,
+         null,  --lo_yw_transport.supplier_name,
+         null,  --lo_jc_supplier.contact,
+         null,  --lo_jc_supplier.telephone,
+         null,
+         null,
+         xs_yw_sale_order_info.plan_status,
+         district.departmentname,
+         xs_yw_sale_order_info.market,
+         xs_yw_sale_order_info.case_price,
+         null,
+         null,  --lo_yw_transport_detail.mileage,
+         xs_yw_sale_order_info.deliver_type,
+         null,
+         null,
+         null,
+         xs_yw_sale_order_info.vbeln_new,
+	 xs_yw_sale_order_info.posnr_new,
+	 xs_yw_sale_order_info.deliver_note,
+	 xs_yw_sale_order_info.lun_month,xs_yw_sale_order_info.lun_sort,
+	 xs_yw_sale_order_info.assign_time,
+	 xs_yw_sale_order_info.market_check,
+	 null,null,
+	xs_yw_sale_order_info.request_deliver_date,
+	xs_yw_sale_order_info.plan_time,
+	xs_yw_sale_order_info.affirm_time,
+	jc_customer_tostation.obj_properties, --2016.1.15 crd
+	xs_yw_sale_order_info.p_month'月'xs_yw_sale_order_info.p_xun,
+	xs_yw_sale_order_info.p_year,
+         xs_yw_sale_order_info.p_month,
+         xs_yw_sale_order_info.p_xun
+    from jc_material,
+         jc_materialunitexchange,
+         jc_units,
+         --jc_innerentity innerentity_b,
+         jc_department innerentity_b,
+         xs_yw_sale_order_info,
+         xs_yw_dept_2_deliver,
+         --市场、地区、客户
+         jc_department district,
+         jc_sale_customer,
+         xs_yw_dept_deliver_plan,
+         jc_customer_tostation--2016.1.15 crd
+   where ( jc_material.materialid = xs_yw_dept_deliver_plan.mtrl_no ) and
+         --市场地区客户
+         ( jc_sale_customer.district_no = district.departmentid ) and
+         ( xs_yw_sale_order_info.customer_no = jc_sale_customer.customer_no ) and
+         ( xs_yw_sale_order_info.ware_no = xs_yw_dept_2_deliver.departmentid ) and
+         ( xs_yw_sale_order_info.ware_no = innerentity_b.departmentid ) and
+         ( xs_yw_sale_order_info.mtrl_no = jc_materialunitexchange.materialid ) and
+         ( jc_materialunitexchange.unit_no = jc_units.unit_no ) and
+         ( jc_units.unit_gb = xs_yw_sale_order_info.unit_no ) and
+         ( xs_yw_dept_deliver_plan.order_no = xs_yw_sale_order_info.order_no ) and
+         ( xs_yw_dept_deliver_plan.order_itemno = xs_yw_sale_order_info.order_itemno ) and
+         ( xs_yw_dept_deliver_plan.bill_type = '销售' ) and
+         ( xs_yw_dept_2_deliver.loc_no = as_place ) and  
+         (( xs_yw_dept_deliver_plan.deliver_status = '确认' ) or
+          ( xs_yw_dept_deliver_plan.deliver_status = '已生成' )) and
+         ( xs_yw_sale_order_info.plan_status in ( '实发', '结案' )) and
+         ( xs_yw_sale_order_info.deliver_date = ad_date_start ) and
+         ( xs_yw_sale_order_info.deliver_date  (ad_date_end + interval '1 day')) and
+          ( jc_customer_tostation.use_dept = 'bm3318' ) and
+          ( jc_customer_tostation.series_no = xs_yw_sale_order_info.series_no) ;
+
+  insert into t_query_deliver_data_single
+  select xs_yw_dept_deliver_plan.order_no,
+         xs_yw_dept_deliver_plan.order_itemno,
+         xs_yw_dept_deliver_plan.outware_sheet_no,
+         xs_yw_dept_deliver_plan.sheet_item_no,
+         xs_yw_dept_deliver_plan.customer_no,
+         xs_yw_yk_order_info.ware_name,
+         xs_yw_dept_deliver_plan.mtrl_no,
+         jc_material.materialname,
+         xs_yw_dept_deliver_plan.plan_integer,
+         xs_yw_dept_deliver_plan.trans_way,
+         xs_yw_dept_deliver_plan.ware_no,
+         innerentity_b.departmentname entityname,
+         xs_yw_dept_deliver_plan.about_deliver_date,
+         xs_yw_dept_deliver_plan.dept_deliver_date,
+         xs_yw_dept_deliver_plan.market_deliver_day,
+         xs_yw_dept_deliver_plan.deliver_status,
+         xs_yw_dept_deliver_plan.ship_to_addr,
+         xs_yw_dept_deliver_plan.deliver_note,
+         jc_materialunitexchange.transweight,
+         xs_yw_yk_order_info.deliver_date,
+         xs_yw_yk_order_info.deliver_integer,
+         null,  --lo_yw_transport.supplier_name,
+         null,  --lo_jc_supplier.contact,
+         null,  --lo_jc_supplier.telephone,
+         xs_yw_yk_order_info.in_integer,
+         xs_yw_yk_order_info.in_date,
+         xs_yw_yk_order_info.plan_status,
+         '',
+         '',
+         0,
+         0,
+         null,  --lo_yw_transport_detail.mileage,
+         '',
+         null,
+         null,
+         null,
+         xs_yw_yk_order_info.vbeln_new,
+	 xs_yw_yk_order_info.posnr_new,
+	 xs_yw_yk_order_info.deliver_note,null,null,
+	 xs_yw_yk_order_info.assign_time,
+	 xs_yw_yk_order_info.market_check,
+	 null,null,
+	xs_yw_yk_order_info.request_deliver_date,
+	xs_yw_yk_order_info.plan_time,
+	xs_yw_yk_order_info.affirm_time,
+	jc_customer_tostation.obj_properties, --2016.1.15 crd
+	'',0,0,''
+    from jc_material,
+         jc_materialunitexchange,
+         jc_units,
+         jc_department innerentity_b,
+         xs_yw_yk_order_info,
+         xs_yw_dept_2_deliver,
+         xs_yw_dept_deliver_plan,
+         jc_customer_tostation
+   where ( jc_material.materialid = xs_yw_dept_deliver_plan.mtrl_no ) and
+         ( xs_yw_dept_deliver_plan.ware_no = xs_yw_dept_2_deliver.departmentid ) and
+         ( xs_yw_dept_deliver_plan.ware_no = innerentity_b.departmentid ) and
+         ( xs_yw_dept_deliver_plan.mtrl_no = jc_materialunitexchange.materialid ) and
+         ( jc_materialunitexchange.unit_no = jc_units.unit_no ) and
+         ( jc_units.unit_gb = xs_yw_dept_deliver_plan.unit_no ) and
+         ( xs_yw_dept_deliver_plan.order_no = xs_yw_yk_order_info.order_no ) and
+         ( xs_yw_dept_deliver_plan.order_itemno = xs_yw_yk_order_info.order_itemno ) and
+         ( xs_yw_dept_deliver_plan.bill_type = '移库' ) and
+         ( xs_yw_dept_2_deliver.loc_no = as_place ) and  
+         ((xs_yw_dept_deliver_plan.deliver_status = '确认' ) or
+          (xs_yw_dept_deliver_plan.deliver_status = '已生成')) and
+         ( xs_yw_yk_order_info.plan_status in ( '实发', '结案' )) and
+         ( xs_yw_yk_order_info.deliver_date = ad_date_start ) and
+         ( xs_yw_yk_order_info.deliver_date  (ad_date_end + interval '1 day')) and
+          ( jc_customer_tostation.use_dept = 'bm3318' ) and
+          ( jc_customer_tostation.series_no = xs_yw_yk_order_info.series_no) 
+   order by xs_yw_dept_deliver_plan.dept_deliver_date ASC,
+            xs_yw_dept_deliver_plan.outware_sheet_no ASC,
+            xs_yw_dept_deliver_plan.sheet_item_no ASC;
+
+else
+
+  insert into t_query_deliver_data_single
+  select xs_yw_dept_deliver_plan.order_no,
+         xs_yw_dept_deliver_plan.order_itemno,
+         xs_yw_dept_deliver_plan.outware_sheet_no,
+         xs_yw_dept_deliver_plan.sheet_item_no,
+         xs_yw_dept_deliver_plan.customer_no,
+         xs_yw_sale_order_info.customer_name,
+         xs_yw_dept_deliver_plan.mtrl_no,
+         jc_material.materialname,
+         xs_yw_dept_deliver_plan.plan_integer,
+         xs_yw_dept_deliver_plan.trans_way,
+         xs_yw_dept_deliver_plan.ware_no,
+         innerentity_b.departmentname entityname,
+         xs_yw_dept_deliver_plan.about_deliver_date,
+         xs_yw_dept_deliver_plan.dept_deliver_date,
+         xs_yw_dept_deliver_plan.market_deliver_day,
+         xs_yw_dept_deliver_plan.deliver_status,
+         xs_yw_dept_deliver_plan.ship_to_addr,
+         xs_yw_dept_deliver_plan.deliver_note,
+         jc_materialunitexchange.transweight,
+         xs_yw_sale_order_info.deliver_date,
+         xs_yw_sale_order_info.deliver_integer,
+         null,  --lo_yw_transport.supplier_name,
+         null,  --lo_jc_supplier.contact,
+         null,  --lo_jc_supplier.telephone,
+         null,
+         null,
+         xs_yw_sale_order_info.plan_status,
+         district.departmentname,
+         xs_yw_sale_order_info.market,
+         xs_yw_sale_order_info.case_price,
+         null,
+         null,  --lo_yw_transport_detail.mileage,
+         xs_yw_sale_order_info.deliver_type,
+         null,
+         null,
+         null,
+         xs_yw_sale_order_info.vbeln_new,
+	 xs_yw_sale_order_info.posnr_new,
+	 xs_yw_sale_order_info.deliver_note,
+	 xs_yw_sale_order_info.lun_month,xs_yw_sale_order_info.lun_sort,
+	 xs_yw_sale_order_info.assign_time,
+	 xs_yw_sale_order_info.market_check
+	 , null,null,
+	xs_yw_sale_order_info.request_deliver_date,
+	xs_yw_sale_order_info.plan_time,
+	xs_yw_sale_order_info.affirm_time,
+	jc_customer_tostation.obj_properties ,--2016.1.15 crd
+	xs_yw_sale_order_info.p_month'月'xs_yw_sale_order_info.p_xun,
+	xs_yw_sale_order_info.p_year,
+         xs_yw_sale_order_info.p_month,
+         xs_yw_sale_order_info.p_xun
+    from jc_material,
+         jc_materialunitexchange,
+         jc_units,
+         jc_department innerentity_b,
+         xs_yw_sale_order_info,
+         jc_department district,
+         jc_sale_customer,
+         xs_yw_dept_deliver_plan,
+         jc_customer_tostation
+   where ( jc_material.materialid = xs_yw_dept_deliver_plan.mtrl_no ) and
+         --市场地区客户
+         ( jc_sale_customer.district_no = district.departmentid ) and
+         ( xs_yw_sale_order_info.customer_no = jc_sale_customer.customer_no ) and
+         ( xs_yw_sale_order_info.ware_no = innerentity_b.departmentid ) and
+         ( xs_yw_sale_order_info.mtrl_no = jc_materialunitexchange.materialid ) and
+         ( jc_materialunitexchange.unit_no = jc_units.unit_no ) and
+         ( jc_units.unit_gb = xs_yw_sale_order_info.unit_no ) and
+         ( xs_yw_dept_deliver_plan.order_no = xs_yw_sale_order_info.order_no ) and
+         ( xs_yw_dept_deliver_plan.order_itemno = xs_yw_sale_order_info.order_itemno ) and
+         ( xs_yw_dept_deliver_plan.bill_type = '销售' ) and
+         (( xs_yw_dept_deliver_plan.deliver_status = '确认' ) or
+          ( xs_yw_dept_deliver_plan.deliver_status = '已生成' )) and
+         ( xs_yw_sale_order_info.plan_status in ( '实发', '结案' )) and
+         ( xs_yw_sale_order_info.deliver_date = ad_date_start ) and
+         ( xs_yw_sale_order_info.deliver_date  (ad_date_end + interval '1 day')) and
+          ( jc_customer_tostation.use_dept = 'bm3318' ) and
+          ( jc_customer_tostation.series_no = xs_yw_sale_order_info.series_no) ;
+
+  insert into t_query_deliver_data_single
+  select xs_yw_dept_deliver_plan.order_no,
+         xs_yw_dept_deliver_plan.order_itemno,
+         xs_yw_dept_deliver_plan.outware_sheet_no,
+         xs_yw_dept_deliver_plan.sheet_item_no,
+         xs_yw_dept_deliver_plan.customer_no,
+         xs_yw_yk_order_info.ware_name,
+         xs_yw_dept_deliver_plan.mtrl_no,
+         jc_material.materialname,
+         xs_yw_dept_deliver_plan.plan_integer,
+         xs_yw_dept_deliver_plan.trans_way,
+         xs_yw_dept_deliver_plan.ware_no,
+         innerentity_b.departmentname entityname,
+         xs_yw_dept_deliver_plan.about_deliver_date,
+         xs_yw_dept_deliver_plan.dept_deliver_date,
+         xs_yw_dept_deliver_plan.market_deliver_day,
+         xs_yw_dept_deliver_plan.deliver_status,
+         xs_yw_dept_deliver_plan.ship_to_addr,
+         xs_yw_dept_deliver_plan.deliver_note,
+         jc_materialunitexchange.transweight,
+         xs_yw_yk_order_info.deliver_date,
+         xs_yw_yk_order_info.deliver_integer,
+         null,  --lo_yw_transport.supplier_name,
+         null,  --lo_jc_supplier.contact,
+         null,  --lo_jc_supplier.telephone,
+         xs_yw_yk_order_info.in_integer,
+         xs_yw_yk_order_info.in_date,
+         xs_yw_yk_order_info.plan_status,
+         '',
+         '',
+         0,
+         0,
+         null,  --lo_yw_transport_detail.mileage,
+         '',
+         null,
+         null,
+         null,
+         xs_yw_yk_order_info.vbeln_new,
+	 xs_yw_yk_order_info.posnr_new,
+	 xs_yw_yk_order_info.deliver_note,null,null,
+	 xs_yw_yk_order_info.assign_time,
+	 xs_yw_yk_order_info.market_check,
+	 null,null,
+	xs_yw_yk_order_info.request_deliver_date,
+	xs_yw_yk_order_info.plan_time,
+	xs_yw_yk_order_info.affirm_time,
+	jc_customer_tostation.obj_properties ,--2016.1.15 crd
+	'',0,0,''
+    from jc_material,
+         jc_materialunitexchange,
+         jc_units,
+         jc_department innerentity_b,
+         xs_yw_yk_order_info,
+         xs_yw_dept_deliver_plan,
+         jc_customer_tostation
+   where ( jc_material.materialid = xs_yw_dept_deliver_plan.mtrl_no ) and
+         ( xs_yw_yk_order_info.ware_no = innerentity_b.departmentid ) and
+         ( xs_yw_yk_order_info.mtrl_no = jc_materialunitexchange.materialid ) and
+         ( jc_materialunitexchange.unit_no = jc_units.unit_no ) and
+         ( jc_units.unit_gb = xs_yw_yk_order_info.unit_no ) and
+         ( xs_yw_dept_deliver_plan.order_no = xs_yw_yk_order_info.order_no ) and
+         ( xs_yw_dept_deliver_plan.order_itemno = xs_yw_yk_order_info.order_itemno ) and
+         ( xs_yw_dept_deliver_plan.bill_type = '移库' ) and
+         (( xs_yw_dept_deliver_plan.deliver_status = '确认' ) or
+          ( xs_yw_dept_deliver_plan.deliver_status = '已生成' )) and
+         ( xs_yw_yk_order_info.plan_status in ( '实发', '结案' )) and
+         ( xs_yw_yk_order_info.deliver_date = ad_date_start ) and
+         ( xs_yw_yk_order_info.deliver_date  (ad_date_end + interval '1 day'))and
+          ( jc_customer_tostation.use_dept = 'bm3318' ) and
+          ( jc_customer_tostation.series_no = xs_yw_yk_order_info.series_no) 
+   order by xs_yw_dept_deliver_plan.dept_deliver_date ASC,
+            xs_yw_dept_deliver_plan.outware_sheet_no ASC,
+            xs_yw_dept_deliver_plan.sheet_item_no ASC;
+
+end if;
+
+CREATE INDEX idx_deliver_data ON t_query_deliver_data_single (order_no, order_itemno);
+
+update t_query_deliver_data_single
+   set cus_confirm_num = xs_yw_web_sale_order_deliver.cus_confirm_num,
+       cus_confirm_date = xs_yw_web_sale_order_deliver.cus_confirm_date,
+       common_day = xs_yw_web_sale_order_deliver.common_day,
+       cus_note = xs_yw_web_sale_order_deliver.cus_note
+  from xs_yw_web_sale_order_deliver
+ where t_query_deliver_data_single.order_itemno = xs_yw_web_sale_order_deliver.order_itemno
+   and t_query_deliver_data_single.order_no = xs_yw_web_sale_order_deliver.order_no;
+
+update t_query_deliver_data_single
+   set mtrl_type = xs_jc_materialascription.typename
+  from xs_jc_materialascription
+ where t_query_deliver_data_single.mtrl_no = xs_jc_materialascription.materialid
+   and xs_jc_materialascription.classname = '产品产能分类'
+   and xs_jc_materialascription.rank = 2;
+
+update t_query_deliver_data_single 
+   set parenttypename = xs_jc_materialascription.typename
+  from xs_jc_materialascription
+ where t_query_deliver_data_single.mtrl_no = xs_jc_materialascription.materialid
+   and xs_jc_materialascription.classname = '产品产能分类'
+   and xs_jc_materialascription.rank = 1;
+
+--20101225
+--201115 supplier_name在lo_jc_supplier取
+--LES里程、托运单位、联系人、电话
+update t_query_deliver_data_single
+   set supplier_name = lo_jc_supplier.supplier_name,
+       contact = lo_jc_supplier.contact,
+       telephone = lo_jc_supplier.telephone,
+       mileage = lo_yw_transport_detail.mileage
+  from lo_yw_transport_detail,
+       lo_yw_transport,
+       lo_jc_supplier
+ where t_query_deliver_data_single.outware_sheet_no = lo_yw_transport_detail.delivery
+   and t_query_deliver_data_single.sheet_item_no = lo_yw_transport_detail.delivery_item
+   and lo_yw_transport.corporation = lo_jc_supplier.corporation
+   and lo_yw_transport.supplier = lo_jc_supplier.supplier
+   and lo_yw_transport.transport_id = lo_yw_transport_detail.transport_id
+   and lo_yw_transport_detail.delivery  '0';
+
+   update t_query_deliver_data_single
+	set supplier_name = lo_deliver_supplier.col4,
+            telephone = lo_deliver_supplier.supplier_tel
+	from   lo_deliver_supplier 
+	where t_query_deliver_data_single.outware_sheet_no = lo_deliver_supplier.col1  ;
+
+
+   update t_query_deliver_data_single
+	set   place_name = jc_place.place_name
+	from jc_department,jc_place
+	where t_query_deliver_data_single.ware_no = jc_department.departmentid and
+		jc_department.placecode = jc_place.place_code ;	
+
+--片区 
+update t_query_deliver_data_single
+set pianqu = jc_department.departmentname 
+from  jc_rankdiagram,   
+      jc_department, jc_higherdepartment
+where t_query_deliver_data_single.ware_no = jc_higherdepartment.departmentid and
+        jc_higherdepartment.ancientid  =   jc_rankdiagram.departmentid  and
+        ( jc_rankdiagram.parentid = jc_department.departmentid ) and  
+         (  jc_rankdiagram.ranktype = '生产组织' ) AND  
+         ( jc_rankdiagram.rankid = 30  ) and
+          ( jc_higherdepartment.ranktype = '行政' ) AND  
+         ( jc_higherdepartment.ancientrankid = 20 ) ;
+
+
+update t_query_deliver_data_single set request_deliver_xun = request_deliver_xunxs_jc_order_xun_date.note
+from xs_jc_order_xun_date
+where t_query_deliver_data_single.p_year = xs_jc_order_xun_date.p_year and
+      t_query_deliver_data_single.p_month = xs_jc_order_xun_date.p_month and
+      t_query_deliver_data_single.p_xun = xs_jc_order_xun_date.functionname and
+      xs_jc_order_xun_date.functionmodule = '报站自然旬';
+
+
+
+  
+for rs in execute 'select t_query_deliver_data_single.order_no,
+       t_query_deliver_data_single.order_itemno,
+       t_query_deliver_data_single.outware_sheet_no,
+       t_query_deliver_data_single.sheet_item_no,
+       t_query_deliver_data_single.customer_no,
+       t_query_deliver_data_single.customer_name,
+       t_query_deliver_data_single.mtrl_no,
+       t_query_deliver_data_single.materialname,
+       t_query_deliver_data_single.plan_integer,
+       t_query_deliver_data_single.trans_way,
+       t_query_deliver_data_single.ware_no,
+       t_query_deliver_data_single.ware_name,
+       t_query_deliver_data_single.about_deliver_date,
+       t_query_deliver_data_single.dept_deliver_date,
+       t_query_deliver_data_single.market_deliver_day,
+       t_query_deliver_data_single.deliver_status,
+       t_query_deliver_data_single.ship_to_addr,
+       t_query_deliver_data_single.deliver_note,
+       t_query_deliver_data_single.unitweight,
+       t_query_deliver_data_single.deliver_date,
+       t_query_deliver_data_single.deliver_integer,
+       t_query_deliver_data_single.supplier_name,
+       t_query_deliver_data_single.contact,
+       t_query_deliver_data_single.telephone,
+       t_query_deliver_data_single.cus_confirm_num,
+       t_query_deliver_data_single.cus_confirm_date,
+       t_query_deliver_data_single.plan_status,
+       t_query_deliver_data_single.district_name,
+       t_query_deliver_data_single.area_name,
+       t_query_deliver_data_single.case_price,
+       t_query_deliver_data_single.common_day,
+       t_query_deliver_data_single.mileage,
+       t_query_deliver_data_single.deliver_type,
+       t_query_deliver_data_single.mtrl_type,
+       t_query_deliver_data_single.parenttypename,
+       t_query_deliver_data_single.cus_note,
+       t_query_deliver_data_single.vbeln_new,
+       t_query_deliver_data_single.posnr_new,
+       t_query_deliver_data_single.deliver_note2,
+       t_query_deliver_data_single.lun_month,
+       t_query_deliver_data_single.lun_sort,
+       t_query_deliver_data_single.assign_time,
+       t_query_deliver_data_single.market_check,
+       t_query_deliver_data_single.pianqu,
+	t_query_deliver_data_single.place_name,
+	t_query_deliver_data_single.request_deliver_date,
+	t_query_deliver_data_single.plan_time,
+	t_query_deliver_data_single.affirm_time,
+	t_query_deliver_data_single.obj_properties,
+	t_query_deliver_data_single.request_deliver_xun
+  from t_query_deliver_data_single'
+    loop 
+	return next rs ;
+    end loop;
+
+end$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100
+  ROWS 1000

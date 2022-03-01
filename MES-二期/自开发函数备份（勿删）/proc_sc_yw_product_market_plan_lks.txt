@@ -1,0 +1,1051 @@
+CREATE OR REPLACE FUNCTION "mes"."proc_sc_yw_product_market_plan_lks"("ai_year" int4, "ai_month" int4, "as_type" bpchar, "as_data" bpchar, "as_userid" varchar)
+  RETURNS SETOF "pg_catalog"."record" AS $BODY$
+--***********************************************************************
+--集团可供计划生成
+--2016.1.7应生产部童敏珍要求库存和销售计划都转成标准箱
+--***********************************************************************
+declare rs record ; --结果集
+declare as_use_dept varchar(10);
+declare as_plan_type varchar(16);
+declare ldt_end timestamp ;
+declare ldt_start timestamp := CURRENT_DATE;
+declare oper_time timestamp := CURRENT_TIMESTAMP(0);
+declare ls_end varchar(10);
+declare ai_count integer;
+declare ai_plan_no integer;
+declare al_year integer;
+declare al_month integer;
+declare as_typename varchar(32);
+declare as_dept_no varchar(20);
+declare ai_plan_end integer;
+declare ai_year_befor integer;
+declare ai_month_befor integer;
+
+begin
+
+--部门临时表
+create local TEMPORARY table temp_dept (
+	dept_no varchar(10),
+	place_code  varchar(10)
+ )ON COMMIT DROP;
+
+--销售计划输出集
+create local TEMPORARY table temp_sale_plan 
+(
+use_dept varchar(10) null,
+plan_year integer,
+plan_month integer,
+typename varchar(32) null,
+market_name varchar(40) null,
+affirm_qty decimal(20,8) null,
+affirm_qty_xun1 decimal(20,8) null,
+affirm_qty_xun2 decimal(20,8) null,
+affirm_qty_xun3 decimal(20,8) null,
+ware_no varchar(10) null,
+order_qty decimal(20,8) null,
+dept_no varchar(10) null,
+plan_type varchar(16) null 
+)ON COMMIT DROP;
+
+create local TEMPORARY table temp_sale_temp
+(
+use_dept varchar(10) null,
+plan_year integer,
+plan_month integer,
+typename varchar(32) null,
+market_name varchar(40) null,
+affirm_qty decimal(20,8) null,
+affirm_qty_xun1 decimal(20,8) null,
+affirm_qty_xun2 decimal(20,8) null,
+affirm_qty_xun3 decimal(20,8) null,
+ware_no varchar(10) null,
+order_qty decimal(20,8) null,
+dept_no varchar(10) null,
+plan_type varchar(16) null
+)ON COMMIT DROP;
+
+--产品、产品类型
+create local TEMPORARY table temp_mtrl ( 
+typename varchar(32) null,
+mtrl_no varchar(8) null )ON COMMIT DROP;
+
+--各市场产品销售量
+create local TEMPORARY table temp_market_mtrl 
+( 
+market_name varchar(32) null,
+typename varchar(32) null,
+mtrl_no varchar(8) null,
+amount integer null 
+)ON COMMIT DROP;
+
+--市场下各分厂各产品的计划量
+create local TEMPORARY table temp_dept_market 
+( 
+market_name varchar(32) null,
+typename varchar(32) null,
+mtrl_no varchar(8) null,
+ware_no varchar(10) null,
+dept_no varchar(10) null,
+amount integer null,
+total_amount integer null 
+)ON COMMIT DROP;
+
+--仓库库存量
+create local TEMPORARY table temp_stock 
+( 
+ware_no varchar(10) null,
+typename varchar(32) null,
+stock_qty decimal(20,8) null,
+dept_no varchar(10) null,
+sign varchar(1) null 
+)ON COMMIT DROP;
+
+--销售订单
+create local TEMPORARY table temp_order 
+( 
+ware_no varchar(10) null,
+market varchar(32) null,
+typename varchar(32) null,
+order_qty decimal(20,8) null,
+dept_no varchar(10) null 
+)ON COMMIT DROP;
+
+--计划订单
+create local TEMPORARY table temp_planorder 
+( 
+dept_no varchar(10) null,
+typename varchar(32) null,
+plan_qty decimal(20,8) null 
+)ON COMMIT DROP;
+
+--可供计划临时数据
+create local TEMPORARY table temp_data 
+( 
+use_dept varchar(10) null,
+plan_year integer null,
+plan_month integer null,
+dept_no varchar(20) null,
+typename varchar(32) null,
+affirm_qty decimal(20,8) null,
+stock_qty decimal(20,8) null,
+order_qty decimal(20,8) null,
+plan_qty decimal(20,8) null,
+month_prdt decimal(20,8) null,
+sign varchar(1) null 
+)ON COMMIT DROP;
+
+create local TEMPORARY table temp_data_sum
+( 
+plan_no integer null,
+plan_year integer null,
+plan_month integer null,
+dept_no varchar(20) null,
+typename varchar(32) null,
+affirm_qty decimal(20,8) null,
+stock_qty decimal(20,8) null,
+order_qty decimal(20,8) null,
+plan_qty decimal(20,8) null,
+month_prdt decimal(20,8) null
+)ON COMMIT DROP;
+as_use_dept = 'bm3318';
+
+ldt_end = (ai_year::varchar(4) || '.' || ai_month::varchar(2) || '.' || '01')::timestamp;
+if ai_month = 1 then
+ai_month_befor = 12;
+ai_year_befor = ai_year - 1;
+else
+ai_month_befor = ai_month - 1;
+ai_year_befor = ai_year;
+end if;
+
+-- 取部门代码
+-- insert into temp_dept
+--   SELECT DISTINCT jc_higherdepartment.ancientid  
+--     FROM jc_departmentascription,   
+--          jc_higherdepartment  
+--    WHERE ( jc_departmentascription.departmentid = jc_higherdepartment.departmentid ) and  
+--          ( ( jc_departmentascription.classname = '部门分类' ) AND  
+--          ( jc_departmentascription.typename = '成品仓库' ) AND  
+--          ( jc_departmentascription.rank = 1 ) AND  
+--          ( jc_higherdepartment.ranktype = '行政' ) AND  
+--          ( jc_higherdepartment.ancientrankid = 20 )   
+--          )  ;
+insert into temp_dept
+	select 
+	b.factory_code,
+	xs_jc_place_pianqu.place_code
+	from xs_jc_place_pianqu
+	join mdm_factory_production_place b
+	on xs_jc_place_pianqu.place_code = b.production_place_code and b.is_valid = '有效';
+-- 取仓库库存
+-- insert into temp_stock
+-- SELECT cg_yw_stock.plant_no,   
+--          jc_materialascription.typename,   
+--          sum(coalesce(cg_yw_stock.stock_amount,0) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m),   
+-- 			cg_yw_stock.plant_no,		
+--          '0'  
+--     FROM temp_dept,   
+--          jc_materialascription,   
+--          cg_yw_stock  ,xs_jc_unit_exchange
+--    WHERE ( jc_materialascription.materialid = cg_yw_stock.mtrl_no ) and  
+-- 	 ( cg_yw_stock.mtrl_no = xs_jc_unit_exchange.mtrl_no) and  
+--          ( temp_dept.dept_no = cg_yw_stock.plant_no ) and  
+--          ( ( jc_materialascription.classname = '产品产能分类' ) AND  
+--          ( jc_materialascription.rank = 2 ) and
+-- 			( cg_yw_stock.stock_amount <> 0 )   
+--          )   
+-- GROUP BY cg_yw_stock.plant_no,   
+--          jc_materialascription.typename ;
+insert into temp_stock
+select temp_dept.dept_no,
+	cf2.classification_code,
+	sum(wms_matnr_stock.stock_unlimit),
+	temp_dept.dept_no,
+	'0'
+	from temp_dept
+	join wms_matnr_stock 
+	on temp_dept.dept_no = wms_matnr_stock.factory and wms_matnr_stock.stock_unlimit <> 0
+	JOIN mdm_classification cf2 ON cf2.classification_type = '055'
+	AND cf2.classification_level = 2 AND cf2.is_valid = '有效'
+	JOIN mdm_material_classification e2 ON e2.is_valid = '有效' 
+	AND e2.classification_level = 2 
+	AND e2.classification_code = cf2.classification_code 
+	and e2.material_code  = wms_matnr_stock.matnr
+	join mdm_material 
+	on mdm_material.material_code = wms_matnr_stock.matnr and mdm_material.is_valid = '有效' 
+	GROUP BY temp_dept.dept_no,
+		cf2.classification_code;
+		
+raise notice '1.0 %',ldt_start;
+
+-- delete from temp_stock where ware_no like 'bm3318%';
+-- 
+-- delete from temp_stock where ware_no like 'bmB20%';
+-- 
+-- delete from temp_stock where ware_no like 'bmB99B%';
+-- 
+-- delete from temp_stock where ware_no like 'bmC16B%';
+
+-- 取剩余计划
+-- insert into temp_planorder
+--   SELECT sc_yw_product_plan.prod_org,   
+--          jc_materialascription.typename,   
+--          sum((coalesce(sc_yw_product_plan.firm_amount1,0) - coalesce(sc_yw_product_plan.in_amount,0))* xs_jc_unit_exchange.n/xs_jc_unit_exchange.m ) 
+--     FROM jc_materialascription,   
+--          sc_yw_product_plan,xs_jc_unit_exchange
+--    WHERE ( jc_materialascription.materialid = sc_yw_product_plan.mtrl_no ) and  
+--           jc_materialascription.materialid = xs_jc_unit_exchange.mtrl_no and
+--          ( ( jc_materialascription.classname = '产品产能分类' ) AND  
+--          ( jc_materialascription.rank = 2 ) and
+-- 	( sc_yw_product_plan.status in ('审核','入库') ) and
+-- 	( sc_yw_product_plan.begin_date >= ldt_start ) and
+-- 	( sc_yw_product_plan.begin_date < ldt_end ) and
+-- 	( sc_yw_product_plan.plan_type = '50' ) and
+-- 	( sc_yw_product_plan.plan_year = ai_year_befor ) and
+-- 	( sc_yw_product_plan.plan_month = ai_month_befor ) 
+--          )   
+-- GROUP BY sc_yw_product_plan.prod_org,   
+--          jc_materialascription.typename;
+
+insert into temp_planorder
+SELECT
+a.factory_code,
+cf2.classification_code,
+sum(COALESCE(a.planned_output_monthly,0) - COALESCE(actual_real.has_production,0)) as lost_plan
+FROM (SELECT
+	the_year,
+	the_month,
+	dept_no as factory_code,
+	line_no as production_line_code,
+	mtrl_no as material_code_product,
+	SUM ( affirm_plan ) AS planned_output_monthly
+	FROM
+	sc_product_plan_line
+	WHERE
+	the_year = ai_year_befor
+	and the_month = ai_month_befor
+	AND status = '审核'
+	GROUP BY
+	the_year,
+	the_month,
+	dept_no,
+	line_no,
+	mtrl_no
+	) a
+
+left join (select actual.factory_code,
+actual.production_line_code,
+actual.material_code_product,
+sum(actual.actual_output) as has_production  
+from (SELECT
+a.factory_code,
+a.production_line_code,
+a.material_code_product,
+r1.actual_output
+FROM (SELECT
+the_year,
+the_month,
+dept_no as factory_code,
+line_no as production_line_code,
+mtrl_no as material_code_product,
+SUM ( affirm_plan ) AS planned_output_monthly
+FROM
+sc_product_plan_line
+WHERE
+	the_year = ai_year_befor
+	and the_month = ai_month_befor
+AND status = '审核'
+GROUP BY
+the_year,
+the_month,
+dept_no,
+line_no,
+mtrl_no) a
+left join mes_daily_plan p
+on p.is_valid = '有效' and p.factory_code = a.factory_code and p.production_line_code = a.production_line_code and p.material_code_product = a.material_code_product and EXTRACT(year from p.product_date) = a.the_year and EXTRACT(month from p.product_date) = a.the_month
+join mes_process_order r1
+on r1.daily_plan_no = p.daily_plan_no and r1.is_valid = '有效' and r1.status_output = '已确认' and r1.material_code_product = a.material_code_product) actual
+GROUP BY actual.factory_code,
+actual.production_line_code,
+actual.material_code_product) actual_real
+on actual_real.factory_code = a.factory_code and  actual_real.production_line_code = a.production_line_code and actual_real.material_code_product = a.material_code_product
+JOIN mdm_classification cf2 ON cf2.classification_type = '055'
+AND cf2.classification_level = 2 AND cf2.is_valid = '有效'
+JOIN mdm_material_classification e2 ON e2.is_valid = '有效' 
+AND e2.classification_level = 2 
+AND e2.classification_code = cf2.classification_code 
+and e2.material_code  = a.material_code_product
+GROUP BY a.factory_code,
+cf2.classification_code;
+
+raise notice '2.0 %',clock_timestamp();
+
+--  取月销售计划-按市场
+if as_type = '1' then
+	if as_data = '1' then -- 表示取月计划
+		as_plan_type = '月计划';
+
+		--20110119 修改
+-- 		insert into temp_sale_temp
+-- 		SELECT as_use_dept,   
+-- 		xs_yw_web_plan_month.the_year,   
+-- 		xs_yw_web_plan_month.the_month,   
+-- 		jc_materialascription.typename, 
+-- 		jc_rankdiagram.parentid,
+-- 		sum((coalesce(xs_yw_web_plan_month.input_num_xun1,0) + coalesce(xs_yw_web_plan_month.input_num_xun2,0) + coalesce(xs_yw_web_plan_month.input_num_xun3,0)) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m) ,   
+-- 		sum(coalesce(xs_yw_web_plan_month.input_num_xun1,0)* xs_jc_unit_exchange.n/xs_jc_unit_exchange.m)  ,   
+-- 		sum(coalesce(xs_yw_web_plan_month.input_num_xun2,0) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m ),   
+-- 		sum(coalesce(xs_yw_web_plan_month.input_num_xun3,0) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m ),   
+-- 		xs_jc_sale_city_mtrl_place.default_ware,
+-- 		0,null,'计划'
+-- 		FROM xs_yw_web_plan_month,     
+-- 		jc_sale_customer ,jc_rankdiagram,
+-- 		jc_materialascription,xs_jc_sale_cus_city, jc_place,  xs_jc_unit_exchange,
+-- 		 jc_department ,jc_departmentascription,xs_jc_sale_city_mtrl_place      
+-- 		WHERE ( jc_sale_customer.district_no =  jc_rankdiagram.departmentid) and          
+-- 		( xs_yw_web_plan_month.mtrl_no = jc_materialascription.materialid ) and	
+-- 		(jc_materialascription.materialid = xs_jc_unit_exchange.mtrl_no  and
+-- 		( xs_yw_web_plan_month.the_year = ai_year ) AND  
+-- 		( xs_yw_web_plan_month.the_month = ai_month ) AND  
+-- 		( xs_yw_web_plan_month.input_num_month <> 0 ) and
+-- 		( jc_rankdiagram.ranktype = '销售组织' ) and
+-- 		( jc_rankdiagram.rankid = 30 ) and
+-- 		( jc_materialascription.classname = '产品产能分类' ) AND  
+-- 		( jc_materialascription.rank = 2 ) ) and
+-- 		( xs_jc_sale_cus_city.city_no = xs_jc_sale_city_mtrl_place.city_no) and
+-- 		( jc_place.place_code = jc_department.placecode ) and
+-- 		( jc_department.departmentid = xs_jc_sale_city_mtrl_place.ware_no ) and
+-- 
+-- 		( jc_departmentascription.departmentid = jc_department.departmentid )and     
+-- 		( jc_departmentascription.classname = '部门分类' )  and  
+-- 		( jc_departmentascription.rank = 1 ) and  
+-- 		( jc_departmentascription.typename = '成品仓库' ) and
+-- 		( xs_jc_sale_cus_city.customer_no = xs_yw_web_plan_month.customer_no ) and
+-- 		xs_jc_sale_cus_city.customer_no = jc_sale_customer.customer_no and
+-- 		xs_yw_web_plan_month.mtrl_no = xs_jc_sale_city_mtrl_place.mtrl_no
+-- 		group by xs_yw_web_plan_month.the_year,   
+-- 		xs_yw_web_plan_month.the_month,   
+-- 		jc_materialascription.typename, 
+-- 		jc_rankdiagram.parentid,xs_jc_sale_city_mtrl_place.default_ware;
+insert into temp_sale_temp
+SELECT as_use_dept,   
+		xs_yw_web_plan_month.the_year,   
+		xs_yw_web_plan_month.the_month,   
+		cf2.classification_code , 
+		null as parentid,
+		sum((coalesce(xs_yw_web_plan_month.input_num_xun1,0) + coalesce(xs_yw_web_plan_month.input_num_xun2,0) + coalesce(xs_yw_web_plan_month.input_num_xun3,0)) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m) ,   
+		sum(coalesce(xs_yw_web_plan_month.input_num_xun1,0)* xs_jc_unit_exchange.n/xs_jc_unit_exchange.m)  ,   
+		sum(coalesce(xs_yw_web_plan_month.input_num_xun2,0) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m ),   
+		sum(coalesce(xs_yw_web_plan_month.input_num_xun3,0) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m ),  
+		xs_jc_sale_city_mtrl_place.factory_code,
+		0,null,'计划'
+		FROM xs_yw_web_plan_month
+		join xs_jc_sale_cus_city
+		on xs_jc_sale_cus_city.customer_no = xs_yw_web_plan_month.customer_no
+		join xs_jc_sale_city_mtrl_place
+		on xs_jc_sale_cus_city.city_no = xs_jc_sale_city_mtrl_place.city_no and xs_yw_web_plan_month.mtrl_no = xs_jc_sale_city_mtrl_place.mtrl_no
+		join xs_jc_unit_exchange
+		on xs_yw_web_plan_month.mtrl_no = xs_jc_unit_exchange.mtrl_no  
+		JOIN mdm_classification cf2 ON cf2.classification_type = '055'
+		AND cf2.classification_level = 2 AND cf2.is_valid = '有效'
+		JOIN mdm_material_classification e2 ON e2.is_valid = '有效' 
+		AND e2.classification_level = 2 
+		AND e2.classification_code = cf2.classification_code 
+		and e2.material_code  = xs_yw_web_plan_month.mtrl_no		 
+		WHERE    
+		( xs_yw_web_plan_month.the_year = ai_year ) AND  
+		( xs_yw_web_plan_month.the_month = ai_month ) AND  
+		( xs_yw_web_plan_month.input_num_month <> 0 ) 
+
+		group by xs_yw_web_plan_month.the_year,   
+		xs_yw_web_plan_month.the_month,   
+		cf2.classification_code,
+		xs_jc_sale_city_mtrl_place.factory_code;
+		
+		raise notice '3.0 %',clock_timestamp();
+
+		--增加销售订单、移库订单
+-- 		insert into temp_sale_temp
+-- 		SELECT as_use_dept,   
+-- 		ai_year,   
+-- 		ai_month,   
+-- 		jc_materialascription.typename, 
+-- 		jc_rankdiagram.parentid,
+-- 		sum(coalesce(xs_yw_sale_order_info.plan_integer,0) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m),   
+-- 		0,   
+-- 		0,   
+-- 		0,   
+-- 		xs_yw_sale_order_info.ware_no,
+-- 		0,null,'计划'
+-- 		from jc_materialascription,   
+-- 			      xs_yw_sale_order_info,  
+-- 			     jc_sale_customer,  
+-- 			     jc_rankdiagram,xs_jc_unit_exchange
+-- 		where ( jc_materialascription.materialid = xs_yw_sale_order_info.mtrl_no ) and  
+-- 		      ( xs_jc_unit_exchange.mtrl_no = xs_yw_sale_order_info.mtrl_no ) and 
+-- 			( xs_yw_sale_order_info.customer_no = jc_sale_customer.customer_no ) and  
+-- 			( jc_sale_customer.district_no = jc_rankdiagram.departmentid ) and  
+-- 			( ( jc_materialascription.classname = '产品产能分类' ) AND  
+-- 			( jc_materialascription.rank = 2 ) and
+-- 			( jc_rankdiagram.ranktype = '销售组织' ) and
+-- 			( jc_rankdiagram.rankid = 30 ) and
+-- 			( ( xs_yw_sale_order_info.plan_status = '确认' ) or
+-- 			( xs_yw_sale_order_info.plan_status = '调度' ) or 
+-- 			( xs_yw_sale_order_info.plan_status = '打印出库单' ) ) and
+-- 			( xs_yw_sale_order_info.request_deliver_date >= ldt_end)  
+-- 			)  
+-- 		group by  jc_materialascription.typename, 
+-- 		jc_rankdiagram.parentid,
+-- 		xs_yw_sale_order_info.ware_no;
+insert into temp_sale_temp
+		SELECT 
+		as_use_dept,   
+		ai_year,   
+		ai_month,   
+		cf2.classification_code, 
+		null,
+		sum(coalesce(xs_yw_sale_order_info.plan_integer,0) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m),   
+		0,   0,   0,   
+		xs_yw_sale_order_info.factory_code,
+		0,null,'计划'
+		from xs_yw_sale_order_info
+		join xs_jc_unit_exchange
+		on xs_jc_unit_exchange.mtrl_no = xs_yw_sale_order_info.mtrl_no
+		join mdm_material_classification e2
+		on e2.material_code  = xs_yw_sale_order_info.mtrl_no	
+		and e2.is_valid = '有效' AND e2.classification_level = 2
+		join mdm_classification cf2 
+		on cf2.classification_code = e2.classification_code and cf2.classification_type = '055'
+		AND cf2.classification_level = 2 
+		AND cf2.is_valid = '有效'
+		where 
+			( xs_yw_sale_order_info.request_deliver_date >= ldt_end)
+			and ( ( xs_yw_sale_order_info.plan_status = '确认' ) or
+			( xs_yw_sale_order_info.plan_status = '调度' ) or 
+			( xs_yw_sale_order_info.plan_status = '打印出库单' ) )
+		group by  
+		xs_yw_sale_order_info.factory_code,
+		cf2.classification_code;
+		
+		raise notice '4.0 %',clock_timestamp();
+
+-- 		insert into temp_sale_temp
+-- 		SELECT as_use_dept,   
+-- 		ai_year,   
+-- 		ai_month,   
+-- 		jc_materialascription.typename, 
+-- 		xs_yw_yk_order_info.market,
+-- 		sum(coalesce(xs_yw_yk_order_info.plan_integer,0) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m),   
+-- 		0,   
+-- 		0,   
+-- 		0,   
+-- 		xs_yw_yk_order_info.ware_no,
+-- 		0,null,'计划'
+-- 		from jc_materialascription,   
+-- 		     xs_yw_yk_order_info,xs_jc_unit_exchange
+-- 		where ( jc_materialascription.materialid = xs_yw_yk_order_info.mtrl_no ) and  
+-- 		       xs_yw_yk_order_info.mtrl_no = xs_jc_unit_exchange.mtrl_no and
+-- 			( ( jc_materialascription.classname = '产品产能分类' ) AND  
+-- 			( jc_materialascription.rank = 2 ) and
+-- 			( ( xs_yw_yk_order_info.plan_status = '确认' ) or
+-- 			( xs_yw_yk_order_info.plan_status = '调度' ) or 
+-- 			( xs_yw_yk_order_info.plan_status = '打印出库单' ) ) and
+-- 			( xs_yw_yk_order_info.request_deliver_date >= ldt_end)  
+-- 			)  
+-- 		group by  jc_materialascription.typename, 
+-- 		xs_yw_yk_order_info.market,
+-- 		xs_yw_yk_order_info.ware_no;
+insert into temp_sale_temp
+	SELECT 
+		as_use_dept,   
+		ai_year,   
+		ai_month,   
+		cf2.classification_code,
+		xs_yw_yk_order_info.market,
+		sum(coalesce(xs_yw_yk_order_info.plan_integer,0) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m),   
+		0,   
+		0,   
+		0,   
+		xs_yw_yk_order_info.factory_code,
+		0,null,'计划'
+		from    
+		     xs_yw_yk_order_info,xs_jc_unit_exchange,
+				 mdm_material_classification e2 ,
+		mdm_classification cf2
+		where   
+		 xs_yw_yk_order_info.mtrl_no = xs_jc_unit_exchange.mtrl_no
+		 and e2.material_code  = xs_yw_yk_order_info.mtrl_no	AND e2.classification_level = 2
+		and e2.is_valid = '有效'  
+		and cf2.classification_type = '055' 
+		AND cf2.classification_level = 2 
+		AND e2.classification_code = cf2.classification_code
+		AND cf2.is_valid = '有效'
+		and ( ( xs_yw_yk_order_info.plan_status = '确认' ) or
+			( xs_yw_yk_order_info.plan_status = '调度' ) or 
+			( xs_yw_yk_order_info.plan_status = '打印出库单' ) ) and
+			( xs_yw_yk_order_info.request_deliver_date >= ldt_end)  
+			  
+		group by  cf2.classification_code, 
+		xs_yw_yk_order_info.market,
+		xs_yw_yk_order_info.factory_code;
+		
+		raise notice '5.0 %',clock_timestamp();
+		--汇总插入temp_sale_plan
+		insert into temp_sale_plan
+		select use_dept,plan_year,plan_month,typename,market_name,
+		sum(affirm_qty),
+		sum(affirm_qty_xun1) ,
+		sum(affirm_qty_xun2),
+		sum(affirm_qty_xun3) ,
+		ware_no,
+		sum(order_qty),
+		dept_no,plan_type
+		from temp_sale_temp
+		group by use_dept,plan_year,plan_month,typename,market_name,
+		ware_no,
+		dept_no,plan_type;
+		
+		
+     --取销售订单                  
+-- 		insert into temp_order
+-- 		  SELECT xs_yw_sale_order_info.ware_no,   
+-- 					jc_rankdiagram.parentid,   
+-- 					jc_materialascription.typename,   
+-- 					sum(coalesce(xs_yw_sale_order_info.plan_integer,0) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m),   
+-- 					''		
+-- 			 FROM jc_materialascription,   
+-- 			      xs_yw_sale_order_info,  
+-- 			     jc_sale_customer,  
+-- 			     jc_rankdiagram ,xs_jc_unit_exchange,jc_department b 	
+-- 			WHERE ( jc_materialascription.materialid = xs_yw_sale_order_info.mtrl_no ) and
+-- 			      ( xs_yw_sale_order_info.mtrl_no = xs_jc_unit_exchange.mtrl_no) and  
+-- 					( xs_yw_sale_order_info.customer_no = jc_sale_customer.customer_no ) and  
+-- 					( jc_sale_customer.district_no = jc_rankdiagram.departmentid ) and  
+-- 					xs_yw_sale_order_info.ware_no = b.departmentid and
+-- 					( ( jc_materialascription.classname = '产品产能分类' ) AND  
+-- 					( jc_materialascription.rank = 2 ) and
+-- 					--( xs_yw_sale_order_info.use_dept = use_dept ) and
+-- 					( jc_rankdiagram.ranktype = '销售组织' ) and
+-- 					( jc_rankdiagram.rankid = 30 ) and
+-- 					( ( xs_yw_sale_order_info.plan_status = '确认' ) or
+-- 					( xs_yw_sale_order_info.plan_status = '调度' ) or 
+-- 					( xs_yw_sale_order_info.plan_status = '打印出库单' ) ) and
+-- 					( xs_yw_sale_order_info.request_deliver_date < ldt_end)  
+-- 					)   and
+-- 			b.placecode < '9000'
+-- 		GROUP BY xs_yw_sale_order_info.ware_no,   
+-- 			jc_rankdiagram.parentid,   
+-- 			jc_materialascription.typename ;
+			insert into temp_order
+			 SELECT xs_yw_sale_order_info.factory_code,   
+					null,   
+					cf2.classification_code,   
+					sum(coalesce(xs_yw_sale_order_info.plan_integer,0) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m),   
+					''		
+			 FROM    
+			     xs_yw_sale_order_info, 
+					 xs_jc_unit_exchange,
+					 mdm_material_classification e2 ,
+						mdm_classification cf2 
+			WHERE 
+			    ( xs_yw_sale_order_info.mtrl_no = xs_jc_unit_exchange.mtrl_no)
+					and e2.is_valid = '有效' 
+					and cf2.classification_type = '055'
+					AND cf2.classification_level = 2 
+					and e2.material_code  = xs_yw_sale_order_info.mtrl_no	
+					AND e2.classification_code = cf2.classification_code
+					AND e2.classification_level = 2
+					AND cf2.is_valid = '有效'
+					and (( xs_yw_sale_order_info.plan_status = '确认' ) or
+					( xs_yw_sale_order_info.plan_status = '调度' ) or 
+					( xs_yw_sale_order_info.plan_status = '打印出库单' ) ) and
+					( xs_yw_sale_order_info.request_deliver_date < ldt_end)  
+		GROUP BY xs_yw_sale_order_info.factory_code,   
+			cf2.classification_code ;
+
+raise notice '6.0 %',clock_timestamp();
+		--取移库订单
+-- 		insert into temp_order
+-- 		  SELECT xs_yw_yk_order_info.ware_no,   
+-- 			jc_department.departmentid,
+-- 			jc_materialascription.typename,   
+-- 			sum(coalesce(xs_yw_yk_order_info.plan_integer,0) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m),   
+-- 			''		
+-- 			 FROM jc_materialascription,   
+-- 			      xs_yw_yk_order_info,
+-- 			      jc_department  ,xs_jc_unit_exchange,jc_department b
+-- 			WHERE ( jc_materialascription.materialid = xs_yw_yk_order_info.mtrl_no ) and  
+-- 			xs_yw_yk_order_info.mtrl_no = xs_jc_unit_exchange.mtrl_no and
+-- 			xs_yw_yk_order_info.ware_no = b.departmentid and
+-- 			( ( jc_materialascription.classname = '产品产能分类' ) AND  
+-- 			( jc_materialascription.rank = 2 ) and
+-- 			( ( xs_yw_yk_order_info.plan_status = '确认' ) or
+-- 			( xs_yw_yk_order_info.plan_status = '调度' ) or 
+-- 			( xs_yw_yk_order_info.plan_status = '打印出库单' ) )  and
+-- 			( xs_yw_yk_order_info.request_deliver_date < ldt_end )   
+-- 			)  and
+-- 			xs_yw_yk_order_info.market = jc_department.departmentname and
+-- 			b.placecode < '9000'
+-- 		GROUP BY xs_yw_yk_order_info.ware_no,   
+-- 			jc_department.departmentid,
+-- 			jc_materialascription.typename ; 
+			
+			insert into temp_order
+			SELECT xs_yw_yk_order_info.factory_code,   
+			null,
+			cf2.classification_code, 
+			sum(coalesce(xs_yw_yk_order_info.plan_integer,0) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m),   
+			''		
+			 FROM xs_yw_yk_order_info,
+						xs_jc_unit_exchange,
+						mdm_material_classification e2 ,
+						mdm_classification cf2 
+			WHERE 
+			xs_yw_yk_order_info.mtrl_no = xs_jc_unit_exchange.mtrl_no
+			and e2.is_valid = '有效' 
+			and cf2.classification_type = '055'
+			AND cf2.classification_level = 2 
+			and e2.material_code  = xs_yw_yk_order_info.mtrl_no	
+			AND e2.classification_code = cf2.classification_code
+			AND e2.classification_level = 2
+			AND cf2.is_valid = '有效' and
+			( ( xs_yw_yk_order_info.plan_status = '确认' ) or
+			( xs_yw_yk_order_info.plan_status = '调度' ) or 
+			( xs_yw_yk_order_info.plan_status = '打印出库单' ) )  and
+			( xs_yw_yk_order_info.request_deliver_date < ldt_end )   
+		GROUP BY xs_yw_yk_order_info.factory_code,   
+			cf2.classification_code ; 
+			
+raise notice '7.0 %',clock_timestamp();
+
+ 	else --if as_data = '0' then  --表示取订单
+		as_plan_type = '订单';
+
+-- 		insert into temp_sale_plan
+-- 		  SELECT as_use_dept,   
+-- 					ai_year,   
+-- 					ai_month,   
+-- 					jc_materialascription.typename, 
+-- 					jc_rankdiagram.parentid,
+-- 					sum(coalesce(xs_yw_sale_order_info.plan_integer,0) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m),   
+-- 					0,   
+-- 					0,   
+-- 					0,   
+-- 					xs_jc_sale_city_mtrl_place.default_ware,
+-- 					0,null,'订单'  
+-- 			 FROM xs_yw_sale_order_info,   
+-- 					xs_jc_sale_city_mtrl_place,   
+-- 					jc_sale_customer ,
+-- 					jc_sale_city, 
+-- 					jc_rankdiagram,
+-- 					jc_materialascription ,xs_jc_unit_exchange      
+-- 			WHERE ( xs_jc_sale_city_mtrl_place.city_no = jc_sale_city.city_no ) and
+-- 					( jc_sale_city.district_no = jc_sale_customer.district_no) and
+-- 					( jc_sale_city.district_no =  jc_rankdiagram.departmentid) and          
+-- 					( xs_yw_sale_order_info.customer_no = jc_sale_customer.customer_no ) and 
+-- 					( xs_yw_sale_order_info.mtrl_no = xs_jc_sale_city_mtrl_place.mtrl_no ) and
+-- 					( xs_yw_sale_order_info.mtrl_no = jc_materialascription.materialid ) and
+-- 					( xs_yw_sale_order_info.mtrl_no = xs_jc_unit_exchange.mtrl_no ) and	
+-- 					( ( ( xs_yw_sale_order_info.plan_status = '确认' ) or
+-- 					( xs_yw_sale_order_info.plan_status = '调度' ) or 
+-- 					( xs_yw_sale_order_info.plan_status = '打印出库单' ) ) and
+-- 					( xs_yw_sale_order_info.request_deliver_date <  (ldt_end )) and
+-- 					( jc_rankdiagram.ranktype = '市场分类' ) and
+-- 					( jc_rankdiagram.rankid = 30 ) and
+-- 					( xs_jc_sale_city_mtrl_place.default_ware is not null ) and
+-- 					( xs_jc_sale_city_mtrl_place.default_ware <> '' ) and
+-- 					( jc_materialascription.classname = '产品产能分类' ) AND  
+-- 					( jc_materialascription.rank = 2 ) )         
+-- 		group by jc_materialascription.typename, 
+-- 					jc_rankdiagram.parentid,  
+-- 					xs_jc_sale_city_mtrl_place.default_ware;
+
+				insert into temp_sale_plan
+				SELECT 
+					as_use_dept,   
+					ai_year,   
+					ai_month,   
+					cf2.classification_code,  
+					null,
+					sum(coalesce(xs_yw_sale_order_info.plan_integer,0) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m),   
+					0,   
+					0,   
+					0,   
+					xs_jc_sale_city_mtrl_place.default_factory_code,
+					0,null,'订单'  
+			 FROM xs_yw_sale_order_info,   
+					xs_jc_sale_city_mtrl_place,   
+					xs_jc_sale_city, 
+					xs_jc_unit_exchange, 
+					mdm_material_classification e2 ,
+					mdm_classification cf2					
+			WHERE ( xs_jc_sale_city_mtrl_place.city_no = xs_jc_sale_city.city_no ) and
+					( xs_yw_sale_order_info.mtrl_no = xs_jc_sale_city_mtrl_place.mtrl_no ) and
+					( xs_yw_sale_order_info.mtrl_no = xs_jc_unit_exchange.mtrl_no )	
+					and e2.is_valid = '有效' 
+					and cf2.classification_type = '055'
+					AND cf2.classification_level = 2 
+					and e2.material_code  = xs_yw_sale_order_info.mtrl_no	
+					AND e2.classification_code = cf2.classification_code
+					AND e2.classification_level = 2
+					AND cf2.is_valid = '有效'
+				 and ( ( xs_yw_sale_order_info.plan_status = '确认' ) or
+					( xs_yw_sale_order_info.plan_status = '调度' ) or 
+					( xs_yw_sale_order_info.plan_status = '打印出库单' ) ) and
+					( xs_yw_sale_order_info.request_deliver_date < ldt_end) and
+					( xs_jc_sale_city_mtrl_place.default_factory_code is not null ) and
+					( xs_jc_sale_city_mtrl_place.default_factory_code <> '' )         
+		group by cf2.classification_code,  
+					xs_jc_sale_city_mtrl_place.default_factory_code;
+
+raise notice '8.0 %',clock_timestamp();
+
+
+-- 		insert into temp_sale_plan
+-- 		  SELECT as_use_dept,   
+-- 					ai_year,   
+-- 					ai_month,   
+-- 					jc_materialascription.typename, 
+-- 					jc_department.departmentid,
+-- 					sum(coalesce(xs_yw_yk_order_info.plan_integer,0) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m),   
+-- 					0,   
+-- 					0,   
+-- 					0,   
+-- 					xs_yw_yk_order_info.ware_no,
+-- 					0,null,'订单'  
+-- 			 FROM xs_yw_yk_order_info,
+-- 			    jc_materialascription ,
+-- 				jc_department,xs_jc_unit_exchange
+-- 			WHERE ( xs_yw_yk_order_info.mtrl_no = jc_materialascription.materialid ) and	
+-- 			       ( xs_yw_yk_order_info.mtrl_no = xs_jc_unit_exchange.mtrl_no ) and	
+-- 					( ( xs_yw_yk_order_info.plan_status = '确认' ) or
+-- 					( xs_yw_yk_order_info.plan_status = '调度' ) or 
+-- 					( xs_yw_yk_order_info.plan_status = '打印出库单' ) ) and
+-- 					( xs_yw_yk_order_info.request_deliver_date < (ldt_end) ) and
+-- 					( jc_materialascription.classname = '产品产能分类' ) AND  
+-- 					( jc_materialascription.rank = 2 ) and
+-- 					( xs_yw_yk_order_info.market = jc_department.departmentname ) 
+-- 		group by jc_materialascription.typename, 
+-- 			jc_department.departmentid,
+-- 			xs_yw_yk_order_info.ware_no;
+			
+			insert into temp_sale_plan
+			SELECT 
+					as_use_dept,   
+					ai_year,   
+					ai_month,   
+					cf2.classification_code, 
+					null,
+					sum(coalesce(xs_yw_yk_order_info.plan_integer,0) * xs_jc_unit_exchange.n/xs_jc_unit_exchange.m),   
+					0,   
+					0,   
+					0,   
+					xs_yw_yk_order_info.factory_code,
+					0,null,'订单'  
+			 FROM xs_yw_yk_order_info,
+					xs_jc_unit_exchange,
+					mdm_material_classification e2 ,
+					mdm_classification cf2		
+			WHERE 
+			       ( xs_yw_yk_order_info.mtrl_no = xs_jc_unit_exchange.mtrl_no )		
+					and cf2.classification_type = '055'
+					AND cf2.classification_level = 2 
+					and e2.material_code  = xs_yw_yk_order_info.mtrl_no	
+					AND e2.classification_code = cf2.classification_code
+					AND e2.classification_level = 2
+					AND cf2.is_valid = '有效' 
+					and e2.is_valid = '有效' 
+					and ( ( xs_yw_yk_order_info.plan_status = '确认' ) or
+					( xs_yw_yk_order_info.plan_status = '调度' ) or 
+					( xs_yw_yk_order_info.plan_status = '打印出库单' ) ) and
+					( xs_yw_yk_order_info.request_deliver_date < ldt_end )
+		group by cf2.classification_code, 
+			xs_yw_yk_order_info.factory_code;
+
+
+raise notice '9.0 %',clock_timestamp();
+	end if;
+
+end if;
+
+
+update temp_sale_plan
+set dept_no = mdm_factory_production_place.production_place_code
+  from mdm_factory_production_place
+ where temp_sale_plan.ware_no = mdm_factory_production_place.factory_code ;
+
+update temp_order
+set	dept_no = mdm_factory_production_place.production_place_code
+  from mdm_factory_production_place
+ where temp_order.ware_no = mdm_factory_production_place.factory_code ;
+raise notice '10.0 %',clock_timestamp();
+
+--汇总数据
+insert into temp_data
+  select temp_sale_plan.use_dept,
+	temp_sale_plan.plan_year,
+	temp_sale_plan.plan_month,
+	temp_sale_plan.dept_no,
+	temp_sale_plan.typename,
+	temp_sale_plan.affirm_qty,
+	0,0,0,0,'0'
+    from temp_sale_plan;
+
+insert into temp_data
+  select as_use_dept,
+	ai_year,
+	ai_month,
+	temp_stock.dept_no,
+	temp_stock.typename,
+	0,
+	temp_stock.stock_qty,
+	0,0,0,'0'
+    from temp_stock;
+
+insert into temp_data
+  select as_use_dept,
+	ai_year,
+	ai_month,
+	temp_order.dept_no,
+	temp_order.typename,
+	0,0,
+	sum(coalesce(temp_order.order_qty,0)),
+	0,0,'0'
+    from temp_order
+group by dept_no,typename;
+
+insert into temp_data
+  select as_use_dept,
+	ai_year,
+	ai_month,
+	temp_planorder.dept_no,
+	temp_planorder.typename,
+	0,0,0,
+	temp_planorder.plan_qty,0,'0'
+    from temp_planorder;
+
+--将数据写入表中 
+
+
+-- insert into temp_data
+--   SELECT temp_data.use_dept,
+-- 	temp_data.plan_year,   
+--          temp_data.plan_month,   
+--          jc_place.place_name,   
+--          temp_data.typename,		
+--          sum(coalesce(temp_data.affirm_qty,0)),   
+--          sum(coalesce(temp_data.stock_qty,0)),   
+-- 	sum(coalesce(temp_data.order_qty,0)),			
+-- 	sum(coalesce(temp_data.plan_qty,0)),
+-- 	0,'1'
+--     FROM temp_data,jc_department,jc_place
+-- 	where temp_data.dept_no = jc_department.departmentid  and
+-- 	 jc_department.placecode = jc_place.place_code
+-- GROUP BY temp_data.use_dept,
+-- 	temp_data.plan_year,   
+--          temp_data.plan_month,   
+--          jc_place.place_name,   
+--          temp_data.typename;
+				 
+		insert into temp_data	
+		SELECT temp_data.use_dept,
+				temp_data.plan_year,   
+         temp_data.plan_month,   
+         mdm_factory_production_place.production_place_code,   
+         temp_data.typename,		
+         sum(coalesce(temp_data.affirm_qty,0)),   
+         sum(coalesce(temp_data.stock_qty,0)),   
+	sum(coalesce(temp_data.order_qty,0)),			
+	sum(coalesce(temp_data.plan_qty,0)),
+	0,'1'
+    FROM temp_data,mdm_factory_production_place
+	where temp_data.dept_no = mdm_factory_production_place.factory_code 
+GROUP BY temp_data.use_dept,
+					temp_data.plan_year,   
+         temp_data.plan_month,   
+         mdm_factory_production_place.production_place_code, 
+         temp_data.typename;
+
+delete from temp_data where sign = '0';
+
+-- update temp_data
+-- set dept_no = jc_place.place_name
+-- from jc_place
+-- where temp_data.dept_no = jc_place.place_code;
+
+--计算可供量，先注释 目前用不到
+-- update temp_data
+-- set month_prdt = sc_yw_product_ava_plan.month_prdt,
+-- 	sign = '2'
+--   from sc_yw_product_ava_plan
+--  where temp_data.plan_year = sc_yw_product_ava_plan.plan_year and
+-- 	 temp_data.plan_month = sc_yw_product_ava_plan.plan_month and
+-- 	 temp_data.dept_no = sc_yw_product_ava_plan.dept_no and
+-- 	 temp_data.typename = sc_yw_product_ava_plan.mtrl_type and
+-- 	 sc_yw_product_ava_plan.plan_type = as_plan_type;
+-- 
+-- update temp_data
+-- set month_prdt = coalesce(affirm_qty,0) - coalesce(stock_qty,0) - coalesce(plan_qty,0) + coalesce(order_qty,0)
+--  where sign = '1';
+-- 
+-- update temp_data
+-- set month_prdt = 0
+-- where sign = '1' and
+-- month_prdt < 0;
+
+--作废历史数据
+-- update sc_yw_product_ava_plan
+-- set status = '作废'
+-- from temp_data
+--  where temp_data.plan_year = sc_yw_product_ava_plan.plan_year and
+-- 	 temp_data.plan_month = sc_yw_product_ava_plan.plan_month and
+-- 	 temp_data.dept_no = sc_yw_product_ava_plan.dept_no and
+-- 	 temp_data.typename = sc_yw_product_ava_plan.mtrl_type and
+-- 	 sc_yw_product_ava_plan.plan_type = as_plan_type;
+	 
+	 update mes_month_avalaible
+		set is_valid = '无效'
+		from temp_data
+		 where temp_data.plan_year = mes_month_avalaible.the_year and
+			 temp_data.plan_month = mes_month_avalaible.the_month and
+			 temp_data.dept_no = mes_month_avalaible.production_place_code and
+			 temp_data.typename = mes_month_avalaible.classification_code and
+			 mes_month_avalaible.data_type = as_plan_type;
+	 
+	 
+
+--循环处理
+insert into temp_data_sum
+  SELECT null,temp_data.plan_year,   
+         temp_data.plan_month,   
+         temp_data.dept_no,   
+         temp_data.typename,	
+         sum(coalesce(temp_data.affirm_qty,0)),   
+         sum(coalesce(temp_data.stock_qty,0)),   
+	sum(coalesce(temp_data.order_qty,0)),
+	sum(coalesce(temp_data.plan_qty,0)),
+	sum(coalesce(temp_data.month_prdt,0))
+    FROM temp_data
+group by temp_data.plan_year,   
+         temp_data.plan_month,   
+         temp_data.dept_no,   
+         temp_data.typename;
+
+-- --循环处理计划号
+-- select count(*) into ai_count
+-- from temp_data_sum;
+-- 
+-- if ai_count >= 1 then
+-- 	SELECT * into ai_plan_no
+-- 	from nextval('sc_yw_product_ava_plan_plan_no_seq')
+-- 	;
+-- 
+-- 	SELECT * into ai_plan_end from setval('sc_yw_product_ava_plan_plan_no_seq', ai_plan_no + ai_count - 1);
+-- end if;
+-- 
+-- --游标
+-- declare ava_plan cursor for
+-- (select plan_year,plan_month,dept_no,typename from temp_data_sum );
+-- begin
+-- 	open ava_plan;
+-- 	fetch  ava_plan into al_year,al_month,as_dept_no,as_typename; --取temp_bom 的主键（唯一能确定记录行的数据）
+-- 	 while found = true
+-- 	 loop
+-- 		update temp_data_sum
+-- 		set plan_no = ai_plan_no
+-- 		where plan_year = al_year and
+-- 		      plan_month = al_month and
+-- 		      dept_no = as_dept_no and
+-- 		      typename = as_typename;
+-- 
+-- 		ai_plan_no = ai_plan_no + 1;
+-- 
+-- 		fetch  ava_plan into al_year,al_month,as_dept_no,as_typename;
+-- 	 end loop;
+-- 
+-- 	 close ava_plan;
+-- end ;
+
+insert into mes_month_avalaible
+(data_type,
+the_year,
+the_month,
+production_place_code,
+classification_code,
+sale_quantity,
+stock_quantity,
+lack_quantity,
+avalaible_quantity,
+last_lack,
+request_quantity,
+plan_quantity,
+is_valid,
+operate_user,
+operate_time)
+  SELECT as_plan_type,
+				temp_data_sum.plan_year,   
+         temp_data_sum.plan_month,   
+         temp_data_sum.dept_no,   
+         temp_data_sum.typename,	
+					temp_data_sum.affirm_qty, --月销售计划
+					temp_data_sum.stock_qty,--库存
+					0,											--余缺
+					0,											--月可供量
+					0,
+					temp_data_sum.order_qty,	--需求	
+					temp_data_sum.plan_qty, --计划 								
+					'有效',
+					as_userid,
+					oper_time
+    FROM temp_data_sum;
+		
+for rs in execute 'select * from temp_data_sum' 
+loop 
+  return next rs ;
+end loop ;
+
+end
+$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100
+  ROWS 1000

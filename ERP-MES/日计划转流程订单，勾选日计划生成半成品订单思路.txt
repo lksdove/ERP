@@ -1,0 +1,27 @@
+--1.根据工厂、物料 找到配方下的半成品
+ select b.*
+from (SELECT *
+FROM mes_bom_factory
+where factory_code = '2000'
+and material_code_product in ('02916596','02922521','02919314','02919620','02919624','02918734','02918732','02911486','02310012','02921535','02920100','02920098','01000111','02310005','02310007','02912572','02912571','02912208','02912196','02913963','02922544')
+and is_valid = '有效'
+order by bom_edition
+limit 1) a
+left join mes_bom_detail b
+on b.material_code_product = a.material_code_product
+and b.bom_edition = a.bom_edition
+and b.is_valid = '有效'
+and b.valid_begin <= now()
+and b.valid_end >= now()::TIMESTAMP + '-1 day'
+--2、根据半成品代码 去mdm_material中找到material_made_type（自制类型）
+
+
+--3、根据自制类型去mes_work_team_type判断是否为“页面指定类型”
+
+
+
+--444、如果是：去mes_bom_header表 根据物料代码、版本号 找到====》配方基本数量，联合mes_bom_detail 计算半成品实际计划数量
+
+
+--555、如果不是：把当前半成品物料：01000111 继续循环 第一步
+

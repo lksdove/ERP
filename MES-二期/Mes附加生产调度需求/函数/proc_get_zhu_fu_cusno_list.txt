@@ -1,0 +1,44 @@
+CREATE OR REPLACE FUNCTION "public"."proc_get_zhu_fu_cusno_list"()
+  RETURNS TABLE("zhu_cusno" varchar, "fu_cusno" varchar) AS $BODY$
+        --主辅相同
+        select jc_sale_customer.customer_no,
+               jc_sale_customer.customer_no
+        from   jc_sale_customer
+        where  jc_sale_customer.if_together not like '%辅户头%' and
+               jc_sale_customer.if_together <> '非联销体' and
+		jc_sale_customer.cus_status = '有效' and
+		jc_sale_customer.if_available = '正常往来'
+        union
+	--主辅相同
+	select jc_sale_customer.customer_no,
+               jc_sale_customer.customer_no
+        from   jc_sale_customer
+        where  jc_sale_customer.if_together = '非联销体' and
+	       jc_sale_customer.cus_status = '有效' and
+	       jc_sale_customer.if_available = '正常往来' and
+	       (jc_sale_customer.first_customer is null or jc_sale_customer.first_customer = '' )
+
+	union
+	--主辅不同
+        select jc_sale_customer.first_customer,
+	       jc_sale_customer.customer_no    
+        from   jc_sale_customer
+        where  jc_sale_customer.if_together like '%辅户头%' and
+	       jc_sale_customer.cus_status = '有效' and
+	       jc_sale_customer.if_available = '正常往来'  and
+	      (jc_sale_customer.first_customer is not null and jc_sale_customer.first_customer <> '' )
+
+        union
+	--主辅不同
+	select jc_sale_customer.first_customer,
+	       jc_sale_customer.customer_no   
+        from   jc_sale_customer
+        where  jc_sale_customer.if_together = '非联销体' and
+	       jc_sale_customer.cus_status = '有效' and
+	       jc_sale_customer.if_available = '正常往来' and
+	      (jc_sale_customer.first_customer is not null and jc_sale_customer.first_customer <> '' );
+
+$BODY$
+  LANGUAGE sql VOLATILE
+  COST 100
+  ROWS 1000

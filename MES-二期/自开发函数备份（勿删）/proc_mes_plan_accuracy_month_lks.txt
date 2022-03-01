@@ -1,0 +1,211 @@
+CREATE OR REPLACE FUNCTION "mes"."proc_mes_plan_accuracy_month_lks"("ai_year" int4, "ai_month" int4, "adc_z" numeric, "adc_f" numeric, "userid" varchar)
+  RETURNS "pg_catalog"."int4" AS $BODY$
+	declare rs record ;ai_count integer;ai_last_day int ;adt_max_day date ;adt_first_day date;adt_current date; adt_end date;
+
+BEGIN
+adt_first_day := ai_year ::varchar(4) ||'.'||ai_month ::varchar(2) ||'.01' ;
+adt_max_day := adt_first_day + interval '1 month'  - interval '1 day';
+ai_last_day := date_part('day',adt_max_day) ;
+adt_current := current_date -  interval '1 day';
+if adt_current < adt_max_day then
+  adt_end := adt_current;
+else
+  adt_end := adt_max_day;
+end if;
+
+create local TEMPORARY table t_result (	
+	dept_no    character varying(10) null,  -- 分厂代码	
+	big_class   character varying(50)  null,  -- 大类
+	small_class  character varying(50)  null,  -- 小类
+	mtrl_no varchar(10) null, --产品		 
+	month_product  DECIMAL(20,2) null,--月实际产量(标准箱)
+	month_plan DECIMAL(20,2) null, --月生产计划(标准箱)
+	month_diff DECIMAL(20,2) null, --月偏差量(标准箱)	 
+  plan_rate DECIMAL(20,4) null --月生产计划准确率     
+	)ON COMMIT DROP;
+
+create local TEMPORARY table t_temp (
+  the_day   date  null, --日期	
+	dept_no    character varying(10) null,  -- 分厂代码	
+	mtrl_no varchar(10) null, --产品		 
+	day_product  DECIMAL(20,2) null,--日实际产量(标准箱)
+	day_plan DECIMAL(20,2) null, --日生产计划(标准箱)
+	day_diff DECIMAL(20,2) null --日偏差量(标准箱
+        
+	)ON COMMIT DROP;
+	
+create local TEMPORARY table t_temp2 (
+  the_day   date  null, --日期	
+	dept_no    character varying(10) null,  -- 分厂代码	
+	mtrl_no varchar(10) null, --产品		 
+	day_product  DECIMAL(20,2) null,--日实际产量(标准箱)
+	day_plan DECIMAL(20,2) null, --日生产计划(标准箱)
+	day_diff DECIMAL(20,2) null --日偏差量(标准箱
+        
+	)ON COMMIT DROP;
+
+	
+create local TEMPORARY table t_mtrl (
+	big_class   character varying(50)  null,  -- 大类
+	small_class  character varying(50)  null,  -- 小类
+	mtrl_no   character varying(10)  null  -- 产品代码
+	)ON COMMIT DROP;
+
+--说明：
+--1、月偏差量=Σ日偏差量，日偏差量=|日产量-日生产计划量|，系统默认：若0<日产量/日生产计划量-1<20%，或者0<1-日产量/日生产计划量<10%，则日偏差=0；20%与10%为正偏差率与负偏差率标准值，可手工设置修改；
+--2、月生产计划准确率=1-（Σ日偏差量-月偏差扣减量）/月生产计划量；其中，月偏差扣减量可手工修改或导入；
+--3、显示按照片区、产地、分公司汇总；
+		
+ --取日报表产量数据
+	insert into  t_temp2( the_day ,	dept_no,mtrl_no ,day_product )
+	select product_date,factory_code,material_code_product,sum(coalesce(actual_output,0))
+	from mes_output_job
+	where product_date >= adt_first_day
+	and product_date <= adt_end
+	and is_valid = '有效'
+	GROUP BY product_date,factory_code,material_code_product;
+	--取计划产量
+	insert into t_temp2(the_day,dept_no,mtrl_no,day_plan)		
+	select product_date,factory_code,material_code_product,sum(planned_output)
+	from mes_daily_plan_job
+	where product_date >= adt_first_day
+	and product_date <= adt_end
+	and is_valid = '有效'
+	GROUP BY product_date,factory_code,material_code_product;
+
+	--把t_temp2中实际产量和计划产量汇总到t_temp
+	insert into  t_temp( the_day ,dept_no,mtrl_no,day_product,day_plan,day_diff)
+	select the_day,	dept_no, mtrl_no,sum(coalesce(day_product,0)),sum(coalesce(day_plan,0)),abs(sum(coalesce(day_product,0)) - sum(coalesce(day_plan,0)))
+	from  t_temp2
+	where the_day >= adt_first_day and
+	      the_day <= adt_end 
+	group by the_day,dept_no, mtrl_no ;
+	--插入之前先删除之前存在的旧数据
+-- 	delete from mes_plan_accuracy
+-- 	using 	t_temp
+-- 	where 	mes_plan_accuracy.product_date >= adt_first_day and
+-- 	        mes_plan_accuracy.product_date <= adt_end and
+-- 	        t_temp.dept_no = mes_plan_accuracy.factory_code and 
+-- 	        t_temp.mtrl_no = mes_plan_accuracy.material_code_product ;
+delete from mes_plan_accuracy
+using 	t_temp
+where 	
+		mes_plan_accuracy.data_type = '日明细' and 
+		mes_plan_accuracy.the_year = ai_year and
+		mes_plan_accuracy.the_month = ai_month and
+		t_temp.dept_no = mes_plan_accuracy.factory_code and 
+		t_temp.mtrl_no = mes_plan_accuracy.material_code_product ;
+
+	--插入日明细
+	INSERT INTO mes_plan_accuracy(data_type,
+			the_year, 
+			the_month,
+			product_date,
+			factory_code,
+			material_code_product,
+			planned_output,
+			actual_output,
+			deviation_output,
+			is_valid,		
+			operate_user,
+			operate_time)
+	   select 
+			 '日明细',
+			 ai_year ,
+			 ai_month,
+			 the_day,
+			 dept_no ,
+			 mtrl_no ,
+			 day_plan ,
+			 day_product ,
+			 day_diff,
+			 '有效',
+			 userid,
+			 current_timestamp(0)
+	   from t_temp;
+	
+	
+	
+	update t_temp
+	set day_diff = 0
+	where (day_product - day_plan ) <= 0 and
+	      (1- day_product/day_plan ) <= adc_f and
+	      day_plan >  0 ;
+
+  update t_temp
+	set day_diff = 0
+	where (day_product - day_plan ) >= 0 and
+	      (day_product/day_plan  - 1 ) <= adc_z and
+	      day_plan >  0 ;
+--、生产计划准确率：若0<日产量/日生产计划量-1<20%，或者0<1-日产量/日生产计划量<10%，则日偏差=0。
+--如果这两个条件都不满足时，标准偏差值要减掉，即不满足的话要把前面的正常范围内的偏差扣减掉。
+     
+	 update t_temp
+	 set day_diff = day_diff - day_plan * adc_z
+	 where day_diff > 0 and
+				 (day_product - day_plan ) >= 0 and
+				(day_product/day_plan  - 1 ) > adc_z and
+				day_plan >  0 ;
+             
+	update t_temp
+        set day_diff = day_diff - day_plan * adc_f
+        where day_diff > 0 and
+        (day_product - day_plan ) <= 0 and
+	      (1- day_product/day_plan ) > adc_f and
+	      day_plan >  0 ;
+             
+	raise notice 'v1';
+	insert into t_result (dept_no ,mtrl_no ,month_product  ,month_plan ,month_diff )
+	select dept_no,mtrl_no,sum(coalesce(day_product,0)),sum(coalesce(day_plan,0)),sum(coalesce(day_diff,0))
+	from t_temp
+	group by  dept_no,mtrl_no;
+
+	update t_result
+	set plan_rate = 1 - month_diff/month_plan
+	where month_plan > 0 ;
+        
+
+	delete from mes_plan_accuracy
+	using 	t_result
+	where 	
+			mes_plan_accuracy.data_type = '月汇总' and 
+			mes_plan_accuracy.the_year = ai_year and
+			mes_plan_accuracy.the_month = ai_month and
+			t_result.dept_no = mes_plan_accuracy.factory_code and 
+			t_result.mtrl_no = mes_plan_accuracy.material_code_product ;
+					
+	--插入月汇总
+	 INSERT INTO mes_plan_accuracy(data_type,
+			the_year, 
+			the_month,
+			factory_code,
+			material_code_product,
+			planned_output,
+			actual_output,
+			deviation_output,
+			comment,
+			is_valid,		
+			operate_user,
+			operate_time)
+	   select 
+			 '月汇总',
+			 ai_year ,
+			 ai_month,
+			 dept_no ,
+			 mtrl_no ,
+			 month_plan ,
+			 month_product ,
+			 month_diff,
+			 '提取生成,正负偏差率分别为' || adc_z ::varchar(10) || ',' || adc_f ::varchar(10),
+			 '有效',
+			 userid,
+			 current_timestamp(0)
+	   from t_result ;
+
+   return 1 ;
+    
+END;
+
+$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100

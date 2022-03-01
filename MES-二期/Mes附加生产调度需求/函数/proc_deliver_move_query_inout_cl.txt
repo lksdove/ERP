@@ -1,0 +1,227 @@
+CREATE OR REPLACE FUNCTION "public"."proc_deliver_move_query_inout_cl"("as_dept" varchar, "adt_from" timestamp, "adt_to" timestamp)
+  RETURNS SETOF "pg_catalog"."record" AS $BODY$
+
+declare rs record;
+
+begin
+
+--检查临时表是否存在
+--建临时表
+PERFORM schemaname FROM pg_stat_user_tables where relname ='t_move_query_inout_result';
+IF NOT FOUND THEN
+   create local TEMPORARY table t_move_query_inout_result(
+                                                          move_type varchar(12) null,         --移出or移入
+                                                          order_no integer null,              --订单号
+                                                          order_itemno integer null,          --订单项目号
+                                                          outware_sheet_no varchar(20) null,  --出库单号
+                                                          item_no integer null,               --出库单项目号
+                                                          in_ware varchar(10) null,           --移入仓库代码
+                                                          in_ware_name varchar(100) null,     --移入仓库名称
+                                                          mtrl_no varchar(10) null,           --产品代码
+                                                          materialname varchar(100) null,     --产品名称
+                                                          plan_integer numeric(20,8) null,    --定单数
+                                                          deliver_integer numeric(20,8) null, --发货数量
+                                                          in_integer numeric(20,8) null,      --入库数
+                                                          trans_way varchar(10) null,         --运输方式
+                                                          ware_no varchar(10) null,           --发货仓库
+                                                          ware_name varchar(100) null,        --发货仓库名称
+                                                          about_deliver_date timestamp null,  --排货日期
+                                                          dept_deliver_date timestamp null,   --分厂排货日期
+                                                          market_deliver_day timestamp null,  --市场排货日期
+                                                          deliver_date timestamp null,        --发货日期
+                                                          in_date timestamp null,             --入库日期
+                                                          deliver_status varchar(12) null,    --排货状态
+                                                          ship_to_addr varchar(150) null,     --送货地址
+                                                          deliver_note1 varchar(200) null,    --排货备注
+                                                          unitweight numeric(20,8) null,
+                                                          total_weight numeric(20,8) null,
+                                                          bill_type varchar(12) null,
+                                                          deliver_note2 varchar(200) null,    --发货备注
+                                                          connector varchar(32) null,   
+                                                          phone varchar(50) null,
+                                                          supplier_name varchar(200) null,    --托运单位
+                                                          contact varchar(20) null,           --联系人
+                                                          telephone varchar(30) null,         --联系电话
+                                                          assign_status varchar(12) null,     --排货状态
+                                                          plan_status varchar(12) null        --计划状态
+                                                          )ON COMMIT DROP; 
+END IF;
+
+insert into t_move_query_inout_result
+select '移出',
+       xs_yw_yk_order_info.order_no,   
+       xs_yw_yk_order_info.order_itemno,   
+       xs_yw_yk_order_info.outware_sheet_no,   
+       xs_yw_yk_order_info.item_no,   
+       xs_yw_yk_order_info.in_ware,
+       xs_yw_yk_order_info.ware_name,  --移入仓库名称 innerentity_a.entityname,   
+       xs_yw_yk_order_info.mtrl_no,   
+       jc_material.materialname,   
+       coalesce(xs_yw_yk_order_info.plan_integer, 0) as plan_integer,
+       coalesce(xs_yw_yk_order_info.deliver_integer, 0) as deliver_integer,
+       coalesce(xs_yw_yk_order_info.in_integer, 0) as in_integer,
+       xs_yw_yk_order_info.trans_way,   
+       xs_yw_yk_order_info.ware_no,   
+       innerentity_b.entityname,   
+       xs_yw_yk_order_info.about_deliver_date,   
+       xs_yw_dept_deliver_plan.dept_deliver_date,   
+       xs_yw_yk_order_info.market_deliver_day,
+       xs_yw_yk_order_info.deliver_date,
+       xs_yw_yk_order_info.in_date,
+       xs_yw_dept_deliver_plan.deliver_status,   
+       xs_yw_dept_deliver_plan.ship_to_addr,   
+       xs_yw_dept_deliver_plan.deliver_note,   
+       jc_materialunitexchange.unitweight,
+       xs_yw_yk_order_info.plan_integer * jc_materialunitexchange.unitweight / 1000,
+       '移库',
+       xs_yw_yk_order_info.deliver_note, 
+       xs_yw_yk_order_info.connector,   
+       xs_yw_yk_order_info.phone,
+       null,  --lo_jc_supplier_supplier_name,   
+       null,  --lo_jc_supplier_contact,   
+       null,  --lo_jc_supplier_telephone,
+       xs_yw_yk_order_info.assign_status,
+       xs_yw_yk_order_info.plan_status
+  from --jc_innerentity innerentity_a,   
+       jc_material,   
+       xs_yw_dept_2_deliver,   
+       jc_innerentity innerentity_b,   
+       jc_materialunitexchange, 
+       jc_units,
+       xs_yw_dept_deliver_plan,
+       xs_yw_yk_order_info
+ where ( jc_material.materialid = xs_yw_yk_order_info.mtrl_no ) and  
+      -- ( xs_yw_yk_order_info.in_ware = innerentity_a.entityid ) and  
+       ( xs_yw_yk_order_info.ware_no = xs_yw_dept_2_deliver.departmentid ) and  
+       ( xs_yw_yk_order_info.ware_no = innerentity_b.entityid ) and  
+       ( xs_yw_yk_order_info.mtrl_no = jc_materialunitexchange.materialid ) and  
+       ( xs_yw_yk_order_info.unit_no = jc_units.unit_gb ) and
+       ( jc_materialunitexchange.unit_no = jc_units.unit_no ) and  
+       ( xs_yw_dept_2_deliver.loc_no like as_dept ) and
+       ( xs_yw_yk_order_info.plan_status in ('打印出库单', '调度', '实发', '结案') ) and
+       ( xs_yw_yk_order_info.about_deliver_date >= adt_from ) and
+       ( xs_yw_yk_order_info.about_deliver_date < (adt_to + interval '1 day') ) and
+       ( xs_yw_dept_deliver_plan.ware_no = xs_yw_yk_order_info.ware_no ) and
+       ( xs_yw_dept_deliver_plan.order_no = xs_yw_yk_order_info.order_no ) and  
+       ( xs_yw_dept_deliver_plan.order_itemno = xs_yw_yk_order_info.order_itemno );
+
+insert into t_move_query_inout_result
+select '移入',
+       xs_yw_yk_order_info.order_no,   
+       xs_yw_yk_order_info.order_itemno,   
+       xs_yw_yk_order_info.outware_sheet_no,   
+       xs_yw_yk_order_info.item_no,   
+       xs_yw_yk_order_info.in_ware,   
+       xs_yw_yk_order_info.ware_name,  --innerentity_a.entityname,   
+       xs_yw_yk_order_info.mtrl_no,   
+       jc_material.materialname,   
+       coalesce(xs_yw_yk_order_info.plan_integer, 0),
+       coalesce(xs_yw_yk_order_info.deliver_integer, 0),
+       coalesce(xs_yw_yk_order_info.in_integer, 0),
+       xs_yw_yk_order_info.trans_way,   
+       xs_yw_yk_order_info.ware_no,   
+       innerentity_b.entityname,   
+       xs_yw_yk_order_info.about_deliver_date,   
+       xs_yw_dept_deliver_plan.dept_deliver_date,   
+       xs_yw_yk_order_info.market_deliver_day,
+       xs_yw_yk_order_info.deliver_date,
+       xs_yw_yk_order_info.in_date,
+       xs_yw_dept_deliver_plan.deliver_status,   
+       xs_yw_dept_deliver_plan.ship_to_addr,   
+       xs_yw_dept_deliver_plan.deliver_note,   
+       jc_materialunitexchange.unitweight,
+       xs_yw_yk_order_info.plan_integer * jc_materialunitexchange.unitweight / 1000,
+       '移库', 
+       xs_yw_yk_order_info.deliver_note, 
+       xs_yw_yk_order_info.connector,   
+       xs_yw_yk_order_info.phone,
+       null,  --lo_jc_supplier_supplier_name,   
+       null,  --lo_jc_supplier_contact,   
+       null,  --lo_jc_supplier_telephone,
+       xs_yw_yk_order_info.assign_status,
+       xs_yw_yk_order_info.plan_status
+  from --jc_innerentity innerentity_a,   
+       jc_material,     
+       xs_yw_dept_2_deliver,   
+       jc_innerentity innerentity_b,   
+       jc_materialunitexchange, 
+       jc_units,
+       xs_yw_yk_order_info left outer join xs_yw_dept_deliver_plan on ( (xs_yw_dept_deliver_plan.order_no = xs_yw_yk_order_info.order_no) and (xs_yw_dept_deliver_plan.order_itemno = xs_yw_yk_order_info.order_itemno) )
+ where ( jc_material.materialid = xs_yw_yk_order_info.mtrl_no ) and  
+       --( xs_yw_yk_order_info.in_ware = innerentity_a.entityid ) and  
+       ( xs_yw_yk_order_info.in_ware = xs_yw_dept_2_deliver.departmentid ) and  
+       ( xs_yw_yk_order_info.ware_no = innerentity_b.entityid ) and  
+       ( xs_yw_yk_order_info.mtrl_no = jc_materialunitexchange.materialid ) and  
+       ( jc_units.unit_gb = xs_yw_yk_order_info.unit_no ) and  
+       ( jc_materialunitexchange.unit_no = jc_units.unit_no ) and
+       ( xs_yw_dept_2_deliver.loc_no like as_dept ) and  
+       ( xs_yw_yk_order_info.plan_status in ('打印出库单', '调度', '实发', '结案') ) and
+       ( xs_yw_yk_order_info.about_deliver_date >= adt_from ) and
+       ( xs_yw_yk_order_info.about_deliver_date < (adt_to + interval '1 day') ) ;
+
+--LES托运单位、联系人、电话
+update t_move_query_inout_result
+   set supplier_name = lo_jc_supplier.supplier_name,
+       contact = lo_jc_supplier.contact,
+       telephone = lo_jc_supplier.telephone
+  from lo_yw_transport_detail,
+       lo_yw_transport,
+       lo_jc_supplier
+ where ( t_move_query_inout_result.outware_sheet_no = lo_yw_transport_detail.delivery ) and
+       ( t_move_query_inout_result.item_no = lo_yw_transport_detail.delivery_item ) and
+       ( lo_yw_transport.corporation = lo_jc_supplier.corporation ) and
+       ( lo_yw_transport.supplier = lo_jc_supplier.supplier ) and
+       ( lo_yw_transport.transport_id = lo_yw_transport_detail.transport_id ) and 
+       ( lo_yw_transport_detail.delivery > '0' );
+
+   update t_move_query_inout_result
+	set supplier_name = lo_deliver_supplier.col4,
+	    telephone = lo_deliver_supplier.supplier_tel
+	from   lo_deliver_supplier 
+	where t_move_query_inout_result.outware_sheet_no = lo_deliver_supplier.col1  ;
+
+
+
+for rs in execute 'select t_move_query_inout_result.move_type,
+       t_move_query_inout_result.order_no,
+       t_move_query_inout_result.order_itemno,
+       t_move_query_inout_result.outware_sheet_no,
+       t_move_query_inout_result.item_no,
+       t_move_query_inout_result.in_ware,
+       t_move_query_inout_result.in_ware_name,
+       t_move_query_inout_result.mtrl_no,
+       t_move_query_inout_result.materialname,
+       t_move_query_inout_result.plan_integer,
+       t_move_query_inout_result.deliver_integer,
+       t_move_query_inout_result.in_integer,
+       t_move_query_inout_result.trans_way,
+       t_move_query_inout_result.ware_no,
+       t_move_query_inout_result.ware_name,
+       t_move_query_inout_result.about_deliver_date,
+       t_move_query_inout_result.dept_deliver_date,
+       t_move_query_inout_result.market_deliver_day,
+       t_move_query_inout_result.deliver_date,
+       t_move_query_inout_result.in_date,
+       t_move_query_inout_result.deliver_status,
+       t_move_query_inout_result.ship_to_addr,
+       t_move_query_inout_result.deliver_note1,
+       t_move_query_inout_result.unitweight,
+       t_move_query_inout_result.total_weight,
+       t_move_query_inout_result.bill_type,
+       t_move_query_inout_result.deliver_note2,
+       t_move_query_inout_result.connector,
+       t_move_query_inout_result.phone,
+       t_move_query_inout_result.supplier_name,
+       t_move_query_inout_result.contact,
+       t_move_query_inout_result.telephone,
+       t_move_query_inout_result.assign_status,
+       t_move_query_inout_result.plan_status
+  from t_move_query_inout_result'
+    loop 
+	return next rs ;
+    end loop;
+
+end$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100
+  ROWS 1000

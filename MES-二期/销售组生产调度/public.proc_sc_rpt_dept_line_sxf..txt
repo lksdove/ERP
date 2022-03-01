@@ -1,0 +1,171 @@
+CREATE OR REPLACE FUNCTION "public"."proc_sc_rpt_dept_line_sxf"("as_place" varchar, "as_dept" varchar, "ad_date" date)
+  RETURNS SETOF "pg_catalog"."record" AS $BODY$
+declare rs record ;ld_start_next date ;
+        ll_year_next integer;ll_month_next integer;
+begin
+
+	
+	ld_start_next = date_trunc('month',(ad_date+interval '1 month'));
+
+	ll_year_next = date_part('year',ld_start_next);
+	ll_month_next = date_part('month',ld_start_next);
+	
+	create temp table t_loc_line
+	(
+	   pianqu varchar(32),	
+	   place_name varchar(32),
+	   dept_no varchar(10),
+	   dept_name  varchar(100),
+	   line_no varchar(20) NULL,--生产线代码
+	   line_name varchar(30),
+	   mtrl_no varchar(10),
+	   mtrl_name varchar(50),
+	   big_mtrl_class varchar(30),
+	   mtrl_class varchar(30),
+	   day_ability numeric(20,2),
+	   un_prdt_plan numeric(20,2),
+	   next_plan numeric(20,2)
+	)on commit drop;
+
+	create temp table t_dept_plan
+	(
+	   pianqu varchar(32),	
+	   place_name varchar(32),
+	   place_code varchar(10),
+	   dept_no varchar(10),
+	   dept_name  varchar(100)
+	)ON COMMIT DROP;
+
+	create temp table t_loc_prod
+	(
+
+	   dept_no varchar(10),
+	   line_no varchar(20) NULL,--生产线代码
+	   mtrl_no varchar(10),
+	   un_prdt_plan numeric(20,2)
+	)on commit drop;
+
+
+
+	insert into t_dept_plan(dept_no,dept_name,place_code,place_name,pianqu)
+	  SELECT DISTINCT jc_higherdepartment.ancientid,jc_department.departmentname,
+		jc_department.placecode,jc_place.place_name,
+		jc_pianqu.departmentname
+	    FROM jc_departmentascription,   
+		 jc_higherdepartment,
+		jc_department,jc_place,jc_rankdiagram,jc_department jc_pianqu
+	   WHERE ( jc_departmentascription.departmentid = jc_higherdepartment.departmentid ) and  
+		 ( ( jc_departmentascription.classname = '部门分类' ) AND  
+		 ( jc_departmentascription.typename = '成品仓库' ) AND  
+		 ( jc_departmentascription.rank = 1 ) AND  
+		 ( jc_higherdepartment.ranktype = '行政' ) AND  
+		 ( jc_higherdepartment.ancientrankid = 20 ))  and
+		( jc_higherdepartment.ancientid = jc_department.departmentid ) and
+		jc_department.placecode = jc_place.place_code and
+		jc_higherdepartment.ancientid  = jc_rankdiagram.departmentid and
+		jc_rankdiagram.ranktype = '生产组织' and
+		jc_rankdiagram.parentid = jc_pianqu.departmentid and
+		jc_place.place_name like as_place and
+		jc_higherdepartment.ancientid like as_dept ;
+
+	insert into t_loc_line(pianqu,place_name,dept_no,dept_name,line_no,mtrl_no,day_ability,mtrl_class)
+	select t_dept_plan.pianqu,
+		t_dept_plan.place_name,
+		sc_jc_equipment_mtrl.prod_org,
+		t_dept_plan.dept_name,
+		sc_jc_equipment_mtrl.line_no,
+		jc_materialascription.materialid ,
+		sc_jc_equipment_mtrl.day_ability,
+		jc_materialascription.typename
+	from  sc_jc_equipment_mtrl,t_dept_plan,jc_materialascription
+	where sc_jc_equipment_mtrl.mtrl_type = jc_materialascription.typename and
+	      jc_materialascription.classname = '产品产能分类' and
+	      jc_materialascription.rank =2 and 
+	      jc_materialascription.is_valid ='1' and
+	      sc_jc_equipment_mtrl.status ='有效' and
+	      sc_jc_equipment_mtrl.prod_org = t_dept_plan.dept_no ;
+
+	update t_loc_line
+	set big_mtrl_class  =jc_materialascription.typename
+	from jc_materialascription
+	where jc_materialascription.classname = '产品产能分类' and
+	      jc_materialascription.rank =1 and 
+	      t_loc_line.mtrl_no = jc_materialascription.materialid ;
+
+		update t_loc_line
+		set mtrl_name = jc_material.materialname
+		from       jc_material
+		where t_loc_line.mtrl_no =jc_material.materialid ; 
+
+	update t_loc_line
+	set line_name  =sc_jc_equipment_ability.line_name
+	from sc_jc_equipment_ability
+	where t_loc_line.dept_no= sc_jc_equipment_ability.prod_org and
+	      t_loc_line.line_no= sc_jc_equipment_ability.line_no and
+               sc_jc_equipment_ability.org_type = '生产组织' ;
+
+--剩余计划
+insert into t_loc_prod(dept_no,line_no,mtrl_no,un_prdt_plan)
+select 
+t_dept_plan.dept_no,
+ mes_pp_plan_daily2_new.lineno ,
+mes_pp_plan_daily2_new.matnr,
+sum(mes_pp_plan_daily2_new.realamount)
+from mes_pp_plan_daily2_new,
+jc_dept_to_r3,
+t_dept_plan
+where mes_pp_plan_daily2_new.werks = jc_dept_to_r3.loca_no and
+     jc_dept_to_r3.fun_type ='工厂' and
+     jc_dept_to_r3.dept_no = t_dept_plan.dept_no and
+     mes_pp_plan_daily2_new.status  = '有效' and
+     mes_pp_plan_daily2_new.pdate >= ad_date and
+     mes_pp_plan_daily2_new.pdate < ld_start_next
+  group by 
+		t_dept_plan.dept_no,
+		mes_pp_plan_daily2_new.matnr,
+		 mes_pp_plan_daily2_new.lineno ;
+
+
+update t_loc_line
+set un_prdt_plan = t_loc_prod.un_prdt_plan
+from t_loc_prod
+where t_loc_line.dept_no = t_loc_prod.dept_no and
+      t_loc_line.mtrl_no = t_loc_prod.mtrl_no and
+      t_loc_line.line_no = t_loc_prod.line_no ;
+
+truncate table t_loc_prod ;
+--下月计划
+insert into t_loc_prod(dept_no,mtrl_no,line_no,un_prdt_plan)
+select 
+       sc_product_plan_line.dept_no,
+       sc_product_plan_line.mtrl_no,
+       sc_product_plan_line.line_no,
+       sum(sc_product_plan_line.affirm_plan)
+from sc_product_plan_line,t_dept_plan
+where sc_product_plan_line.dept_no = t_dept_plan.dept_no and
+      sc_product_plan_line.the_year =ll_year_next and
+      sc_product_plan_line.the_month = ll_month_next and
+      sc_product_plan_line.status ='审核' 
+group by 
+       sc_product_plan_line.dept_no,
+       sc_product_plan_line.mtrl_no,
+       sc_product_plan_line.line_no;
+
+update t_loc_line
+set next_plan = t_loc_prod.un_prdt_plan
+from t_loc_prod
+where t_loc_line.dept_no = t_loc_prod.dept_no and
+      t_loc_line.mtrl_no = t_loc_prod.mtrl_no and
+      t_loc_line.line_no = t_loc_prod.line_no ;
+
+
+
+	for rs in select * from t_loc_line
+	loop
+		return next rs;
+	end loop;
+end
+$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100
+  ROWS 1000

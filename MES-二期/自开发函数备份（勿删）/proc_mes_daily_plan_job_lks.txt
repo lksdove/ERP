@@ -1,0 +1,24 @@
+CREATE OR REPLACE FUNCTION "mes"."proc_mes_daily_plan_job_lks"()
+  RETURNS "pg_catalog"."int4" AS $BODY$BEGIN
+	-- Routine body goes here...
+	INSERT INTO mes_daily_plan_job ( factory_code, material_code_product, planned_output, product_date, is_valid, operate_user, operate_time ) SELECT
+	factory_code,
+	material_code_product,
+	SUM ( planned_output ) AS planned_output,
+	product_date,
+	'有效',
+	'定时作业',
+	CURRENT_TIMESTAMP ( 0 ) 
+	FROM
+		mes_daily_plan 
+	WHERE
+		is_valid = '有效' 
+		and product_date = CURRENT_DATE + INTERVAL '1 day'
+	GROUP BY
+		factory_code,
+		material_code_product,
+		product_date;
+	RETURN 1;
+END$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100

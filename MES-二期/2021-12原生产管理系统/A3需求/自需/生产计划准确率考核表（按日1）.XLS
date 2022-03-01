@@ -1,0 +1,6 @@
+表名	数据量	耗时(小时)
+mdm_material_factory	2360000	0.83
+mdm_material_sale	2100000	4.16
+mdm_material_warehouse	2650000	0.86
+mdm_material_valuation	5340000	2.4
+		

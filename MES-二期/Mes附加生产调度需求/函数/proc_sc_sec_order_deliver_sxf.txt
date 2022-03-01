@@ -1,0 +1,87 @@
+CREATE OR REPLACE FUNCTION "public"."proc_sc_sec_order_deliver_sxf"("as_cus" _varchar, "ad_market_day" _date, "ai_serial" _int4, "ai_plan_integer" _numeric)
+  RETURNS SETOF "pg_catalog"."record" AS $BODY$	
+--二次调度日接货吨位检测
+declare rs record;
+
+begin
+
+	create temp table t_cus
+	(
+		customer_no varchar(10),
+		customer_name varchar(100),
+		market_deliver_day date ,
+		serial_no integer,
+		plan_integer numeric(20,2),
+		have_integer numeric(20,2),
+		max_integer numeric(20,2),
+		ouver_integer numeric(20,2)
+	)on commit drop;
+
+	create temp table t_cus_plan
+	(
+		customer_no varchar(10),
+		market_deliver_day date ,
+		serial_no integer,
+		plan_integer numeric(20,2)
+	)on commit drop;
+
+	for i in 1..array_upper(as_cus,1)
+	loop
+	raise notice '%' ,ai_plan_integer[i];
+		insert into t_cus(customer_no,market_deliver_day,serial_no,plan_integer)
+		values(as_cus[i],ad_market_day[i],ai_serial[i],ai_plan_integer[i]);
+	end loop;
+	insert into t_cus_plan(customer_no,market_deliver_day,serial_no,plan_integer)
+	select xs_yw_sale_order_info.customer_no,
+	       xs_yw_sale_order_info.market_deliver_day,
+	       xs_yw_sale_order_info.series_no,
+	      round( sum(xs_yw_sale_order_info.plan_integer * jc_materialunitexchange.transweight) :: numeric(20,2) /1000,2)
+	from xs_yw_sale_order_info,t_cus,
+	      jc_units,jc_materialunitexchange
+	where xs_yw_sale_order_info.unit_no = jc_units.unit_gb and
+	      jc_units.unit_no = jc_materialunitexchange.unit_no and
+	      xs_yw_sale_order_info.mtrl_no = jc_materialunitexchange.materialid and
+	      xs_yw_sale_order_info.customer_no = t_cus.customer_no and 
+	      xs_yw_sale_order_info.market_deliver_day = t_cus.market_deliver_day and 
+              xs_yw_sale_order_info.series_no = t_cus.serial_no and 
+              ( ( xs_yw_sale_order_info.plan_status = '调度' and
+              xs_yw_sale_order_info.assign_status  in ('审核','确认')) or 
+                xs_yw_sale_order_info.plan_status  = '打印出库单') and
+            xs_yw_sale_order_info.about_deliver_date >  current_date - interval '3 month '
+      group by xs_yw_sale_order_info.customer_no,
+	       xs_yw_sale_order_info.market_deliver_day,
+	       xs_yw_sale_order_info.series_no ; 
+
+
+      update t_cus
+      set have_integer = t_cus_plan.plan_integer
+      from t_cus_plan
+	where t_cus_plan.customer_no = t_cus.customer_no and 
+	      t_cus_plan.market_deliver_day = t_cus.market_deliver_day and 
+	      t_cus_plan.serial_no = t_cus.serial_no ;
+      
+
+      update t_cus
+      set max_integer = xs_jc_cusday_get_capacity.max_integer
+      from xs_jc_cusday_get_capacity
+	where t_cus.customer_no = xs_jc_cusday_get_capacity.customer_no and 
+	      t_cus.serial_no = xs_jc_cusday_get_capacity.address_code ;
+
+	update t_cus
+	set ouver_integer =  coalesce(plan_integer,0) + coalesce(have_integer,0) - max_integer;
+
+	update t_cus
+	set customer_name = jc_sale_customer.customer_name
+	from jc_sale_customer
+	where t_cus.customer_no =jc_sale_customer.customer_no ;
+	for rs in select * from t_cus   where ouver_integer > 0
+	loop
+		return next rs;
+	end loop;
+      
+       
+end;
+$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100
+  ROWS 1000

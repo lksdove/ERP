@@ -1,0 +1,2309 @@
+CREATE OR REPLACE FUNCTION "public"."proc_sc_auto_deliver_v3_sxf"("as_loc" varchar, "ad_plan_end" date, "as_user" varchar, "as_diff" varchar)
+  RETURNS "pg_catalog"."int4" AS $BODY$
+declare rs record ;ld_plan date ;ll_che integer;rs_order record;rs_street record;rs2 record;
+declare ld_about_deliver_date date ;ld_request_deliver_date date ;ld_plan_time timestamp;
+	ll_order_no integer;
+	ll_count1 integer;
+	ll_count2 integer;
+	ll_zhengche_weight integer =10;
+    ll_zhengche_weight3 integer = 15;
+	ll_che_dan integer =0; --客户日接货吨位检测重新派单标志
+	ll_mtrl_count integer;
+	ll_total_weight numeric(20,4);
+	ll_pin_rows integer =1;
+	ls_resi_new_qty integer;
+	ll_have_plan integer;
+	ll_max_integer numeric(20,2);
+	ll_max_che_order integer;
+	ll_mtrl_count_compute  integer; --是否重新计算订单品种数
+	ll_total_weight1 numeric(20,4);
+	ll_series integer ;  
+	ll_total_weight0 numeric(20,4);
+	ls_pinche_street_no varchar(32);
+	ls_street_no varchar(32) ; 
+	ll_total_weight2 numeric(20,4);
+	ls_pifa_customer varchar(10);
+	ll_pinche_order integer;
+	ll_i integer; 
+	ll_j integer;
+	ll_count integer;
+	ll_pinche_series integer;
+	ll_pinche_series1 integer;
+	i integer;
+begin
+
+i=0;
+ create temp table t_order
+  (
+	  bill_type varchar(20)  ,
+	  order_no integer ,
+	  order_itemno integer ,
+          customer_no varchar(10)  ,
+          mtrl_no varchar(10)  ,
+	  unit_no varchar(12)  ,
+	  plan_integer numeric(20,8) ,
+          about_deliver_date date ,
+          request_deliver_date date,
+	  plan_time timestamp,
+	  trans_way varchar(10)  ,
+	  series_no integer ,
+	  ware_no varchar(10)  ,
+	  plan_weight numeric(20,6) ,
+	 dept_type varchar(12),
+	 street_no varchar(12),
+	 market_deliver_day date,
+	 mtrl_count integer,
+	 zhengche_mark integer,
+	 che_order integer,
+	 plan_status varchar(10),
+	 assign_status varchar(10),
+	 series_order integer,  --地址序号排序，用于拼车确定那个地址先处理
+	 street_order integer , --地址序号排序，用于拼车确定那个地址先处理
+	 pifa_customer varchar(10)
+  )on commit drop;
+
+ create temp table t_deliver_capacity
+  (
+	dept_no varchar(30),
+	mtrl_no varchar(10),
+	plan_date date,
+	st_new_qty integer,
+	freeze_stock integer,
+	plan_qty integer,
+	used_qty integer,
+	resi_new_qty integer,
+	old_resi_new_qty integer,
+	dept_type varchar(12)
+  )on commit drop;
+
+
+
+ create temp table t_deliver_capacity_compare
+  (
+	dept_no varchar(30),
+	mtrl_no varchar(10),
+	plan_date date,
+	st_new_qty integer,
+	freeze_stock integer,
+	plan_qty integer,
+	used_qty integer,
+	resi_new_qty integer,
+	old_resi_new_qty integer,
+	dept_type varchar(12)
+  )on commit drop;
+
+
+ create temp table t_mtrl_count
+  (
+	bill_type varchar(20)  ,
+	order_no integer ,
+	mtrl_count integer
+  )on commit drop;
+
+
+ create temp table t_total_order_deliver
+  (
+	dept_type varchar(20)  ,
+	mtrl_no varchar(10) ,
+	plan_integer integer,
+	plan_weight numeric(20,4),
+	can_deliver integer default 0
+  )on commit drop;
+
+
+
+ create temp table t_order_deliver
+  (
+	dept_type varchar(20)  ,
+	mtrl_no varchar(10) ,
+	plan_integer integer,
+	plan_weight numeric(20,4),
+	can_deliver integer default 0
+  )on commit drop;
+
+
+
+ create temp table t_pinche_order_deliver
+  (
+	dept_type varchar(20)  ,
+	mtrl_no varchar(10) ,
+	plan_integer integer,
+	plan_weight numeric(20,4),
+	can_deliver integer
+  )on commit drop;
+
+ create temp table t_oper_order
+  (
+	bill_type varchar(20)  ,
+	order_no integer ,
+	series_no integer,
+	street_no varchar(12),
+	order_by integer
+  )on commit drop;
+
+
+
+ create temp table t_cus_max_weight
+  (
+	series_no integer,
+	customer_no varchar(10) ,
+	max_integer integer
+  )on commit drop;
+
+ create temp table t_cus_series
+  (
+	series_no integer
+  )on commit drop;
+
+ create temp table t_date_che
+  (
+	plan_date date,
+	che_order integer
+  )on commit drop;
+
+ create temp table t_pin_town
+  (
+	deli_townno varchar(20),
+	pinche_town varchar(20),
+	pinche_xuhao integer
+  )on commit drop;
+
+
+ create temp table t_pinche_order_item
+  (
+	  order_no integer ,
+	  item_no integer
+  )on commit drop;
+
+ create temp table t_oper_pinche_order
+  (
+	  order_no integer 
+  )on commit drop;
+ create temp table t_pinche_order
+  (
+	  order_no integer ,
+	  item_no integer,
+	  xuhao integer
+  )on commit drop;
+
+ create temp table t_pinche_series_data
+  (
+	xuhao serial ,
+	pinche_xuhao integer,
+	series_no integer,
+	about_deliver_date date ,
+	order_no integer
+  )on commit drop;
+ create temp table t_pinche_series_temp
+  (
+	xuhao integer, 
+	series_no integer
+  )on commit drop;
+
+
+ create temp table t_pin_town_deal
+  (
+	deli_townno varchar(20),
+	pinche_town varchar(20),
+	pinche_xuhao integer
+  )on commit drop;
+
+--拼车乡镇
+insert into t_pin_town(deli_townno,pinche_town,pinche_xuhao)
+select deli_townno,pinche_town,pinche_xuhao
+from xs_jc_place_deli_town
+where place_code = as_loc;
+
+
+ create index sub_t_order_street on t_order (street_no);
+create index sub_idx_order_no_order on t_order (order_no);
+  --提取需要预排的订单
+  insert into t_order ( bill_type,order_no,order_itemno,customer_no,mtrl_no,unit_no,plan_integer,
+  about_deliver_date,request_deliver_date,plan_time,trans_way,series_no,ware_no,plan_weight,dept_type,market_deliver_day,
+  plan_status,assign_status,street_no,pifa_customer)
+   SELECT  '销售',
+         xs_yw_sale_order_info.order_no,   
+         xs_yw_sale_order_info.order_itemno,   
+         xs_yw_sale_order_info.customer_no,   
+         xs_yw_sale_order_info.mtrl_no,   
+         xs_yw_sale_order_info.unit_no,
+         xs_yw_sale_order_info.plan_integer,
+         xs_yw_sale_order_info.about_deliver_date,
+         xs_yw_sale_order_info.request_deliver_date,
+         xs_yw_sale_order_info.plan_time,
+         xs_yw_sale_order_info.trans_way,
+         xs_yw_sale_order_info.series_no, 
+         xs_yw_sale_order_info.ware_no,
+         (xs_yw_sale_order_info.plan_integer * jc_materialunitexchange.unitweight/1000) as plan_weight,
+         xs_yw_dept_2_deliver.dept_type,
+         xs_yw_sale_order_info.market_deliver_day,
+         xs_yw_sale_order_info.plan_status,
+         xs_yw_sale_order_info.assign_status,
+         xs_yw_sale_order_info.street_no,
+         xs_yw_sale_order_info.pifa_customer
+    FROM xs_yw_sale_order_info,  
+         xs_yw_dept_2_deliver,  
+	 jc_units,
+         jc_materialunitexchange
+   WHERE 
+         ( xs_yw_sale_order_info.ware_no = xs_yw_dept_2_deliver.departmentid ) and  
+         ( xs_yw_sale_order_info.mtrl_no = jc_materialunitexchange.materialid ) and  
+         ( xs_yw_sale_order_info.unit_no = jc_units.unit_gb ) and
+         ( jc_units.unit_no = jc_materialunitexchange.unit_no ) and
+         ( xs_yw_dept_2_deliver.loc_no = as_loc ) and 
+         ( xs_yw_sale_order_info.plan_status = '调度' ) and  
+         ( xs_yw_sale_order_info.assign_status = '初始' ) and  
+         ( xs_yw_sale_order_info.about_deliver_date >= ( current_date - interval '6 month') ) and
+         ( xs_yw_sale_order_info.about_deliver_date < ( ad_plan_end + interval '1 day') ) and
+         ( xs_yw_sale_order_info.order_type = '正常' ) and
+         ( xs_yw_sale_order_info.plan_integer > 0 )
+   for update of xs_yw_sale_order_info;
+
+
+         
+  insert into t_order ( bill_type,order_no,order_itemno,customer_no,mtrl_no,unit_no,plan_integer,
+  about_deliver_date,request_deliver_date,plan_time,trans_way,series_no,ware_no,plan_weight,dept_type,market_deliver_day,
+    plan_status,assign_status)
+   SELECT  '移库',
+         xs_yw_yk_order_info.order_no,   
+         xs_yw_yk_order_info.order_itemno,   
+         xs_yw_yk_order_info.in_ware,   
+         xs_yw_yk_order_info.mtrl_no,   
+         xs_yw_yk_order_info.unit_no,
+         xs_yw_yk_order_info.plan_integer,
+         xs_yw_yk_order_info.about_deliver_date,
+         xs_yw_yk_order_info.request_deliver_date,
+         xs_yw_yk_order_info.plan_time,
+         xs_yw_yk_order_info.trans_way,
+         xs_yw_yk_order_info.series_no, 
+         xs_yw_yk_order_info.ware_no,
+         (xs_yw_yk_order_info.plan_integer * jc_materialunitexchange.unitweight/1000) as plan_weight,
+         xs_yw_dept_2_deliver.dept_type,
+         xs_yw_yk_order_info.market_deliver_day,
+         xs_yw_yk_order_info.plan_status,
+         xs_yw_yk_order_info.assign_status
+    FROM xs_yw_yk_order_info,  
+         xs_yw_dept_2_deliver,  
+	 jc_units,
+         jc_materialunitexchange
+   WHERE 
+         ( xs_yw_yk_order_info.ware_no = xs_yw_dept_2_deliver.departmentid ) and  
+         ( xs_yw_yk_order_info.mtrl_no = jc_materialunitexchange.materialid ) and  
+         ( xs_yw_yk_order_info.unit_no = jc_units.unit_gb ) and
+         ( jc_units.unit_no = jc_materialunitexchange.unit_no ) and
+         ( xs_yw_dept_2_deliver.loc_no = as_loc ) and 
+         ( xs_yw_yk_order_info.plan_status = '调度' ) and  
+         ( xs_yw_yk_order_info.assign_status = '初始' ) and  
+         ( xs_yw_yk_order_info.about_deliver_date >= ( current_date - interval '6 month') ) and
+         ( xs_yw_yk_order_info.about_deliver_date < ( ad_plan_end + interval '1 day') ) and
+         ( xs_yw_yk_order_info.plan_integer > 0 )
+ for update of xs_yw_yk_order_info;
+
+
+
+insert into t_pin_town(deli_townno,pinche_town,pinche_xuhao)
+select distinct street_no,street_no,0
+from t_order 
+where street_no >'';
+
+
+create index sub_t_deliver_capacity_date on t_deliver_capacity (plan_date,dept_no,mtrl_no);
+
+--产地可供
+insert into t_deliver_capacity(dept_no,mtrl_no,plan_date,st_new_qty,freeze_stock,
+plan_qty,used_qty,resi_new_qty,dept_type,old_resi_new_qty)
+  SELECT xs_yw_dept_deliver_available.dept_no,   
+         xs_yw_dept_deliver_available.mtrl_no,   
+         xs_yw_dept_deliver_available.plan_date,   
+         xs_yw_dept_deliver_available.st_new_qty,   
+         xs_yw_dept_deliver_available.freeze_stock, 
+         xs_yw_dept_deliver_available.plan_qty,   
+         xs_yw_dept_deliver_available.used_qty,   
+         xs_yw_dept_deliver_available.resi_new_qty,   
+         xs_yw_dept_deliver_available.dept_type,
+         xs_yw_dept_deliver_available.resi_new_qty
+    FROM  xs_yw_dept_deliver_available  
+   WHERE ( xs_yw_dept_deliver_available.loc_no = as_loc )  
+  for update ;
+
+
+ create temp table t_pin_series
+  (
+        xuhao serial,
+	series_no integer,
+	plan_weight numeric(20,4),
+	pinche_xuhao integer
+  )on commit drop;
+
+
+--开始进行预排
+
+ld_plan =  current_date + interval '1 day';
+while ld_plan <= ad_plan_end
+loop -- 对应2217行
+	insert into t_date_che(plan_date,che_order)
+	select ld_plan,maxnumber
+	from xs_yw_serialnumber_data
+	where xs_yw_serialnumber_data.serialname =as_loc ||to_char( ld_plan,'yyyymmdd')
+	for update ; 
+
+	if not found then
+		insert into t_date_che(plan_date,che_order)
+		values(ld_plan,0);
+	end if;
+
+	update t_order
+	set mtrl_count =0
+	where assign_status = '初始';
+
+	--订单品种数量
+	truncate table t_mtrl_count;
+	insert into t_mtrl_count(bill_type,order_no,mtrl_count)
+	select bill_type,order_no,count(distinct mtrl_no)
+	from t_order
+	where assign_status = '初始'
+	group by bill_type,order_no ; 
+
+	update t_order
+	set mtrl_count = t_mtrl_count.mtrl_count
+	from t_mtrl_count
+	where t_order.bill_type = t_mtrl_count.bill_type and
+	      t_order.order_no = t_mtrl_count.order_no ;
+
+ 	truncate table t_oper_order ; 
+ 	-- 1 移库单先排 建议发货日期，指定日期，报站时间和品种数排序 排可供
+	loop  -- 对应444行
+		select distinct about_deliver_date,request_deliver_date,plan_time,mtrl_count,order_no
+		into ld_about_deliver_date,ld_request_deliver_date,ld_plan_time,ll_mtrl_count,ll_order_no
+		from t_order
+		where bill_type = '移库' and assign_status = '初始' and 
+		      order_no not in (select order_no from t_oper_order where 	 bill_type = '移库'  ) and
+		      about_deliver_date < ld_plan + interval '1 day'
+		order by about_deliver_date,mtrl_count desc,request_deliver_date,plan_time 
+		limit 1 ;
+
+		if not found then
+			exit;
+		end if;
+		
+		--检测可排量
+		truncate table t_order_deliver;
+		insert into t_order_deliver(dept_type,mtrl_no,plan_integer)
+		select dept_type,mtrl_no,sum(plan_integer)
+		from t_order
+		where bill_type = '移库' and  order_no = ll_order_no and
+		      assign_status ='初始' 
+		group by dept_type,mtrl_no;
+
+		select count(1)
+		into ll_count1 
+		from t_order_deliver ;
+
+
+		select count(1) into ll_count2
+		from t_deliver_capacity,t_order_deliver
+		where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+		      t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+		      t_deliver_capacity.resi_new_qty > t_order_deliver.plan_integer and
+		      t_deliver_capacity.plan_date  = ld_plan ; 
+
+
+ 		if ll_count1 = ll_count2 and ll_count1 > 0 then
+
+ 			--每个产品可排量足够 则排单扣除可供量，则加已经排量
+			update t_deliver_capacity
+			set used_qty = used_qty + t_order_deliver.plan_integer,
+			    resi_new_qty = resi_new_qty - t_order_deliver.plan_integer
+			 from t_order_deliver
+			where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+			      t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+			      t_deliver_capacity.plan_date =ld_plan ; 
+
+			update t_deliver_capacity
+			set st_new_qty = st_new_qty - t_order_deliver.plan_integer,
+			    resi_new_qty = resi_new_qty - t_order_deliver.plan_integer
+			 from t_order_deliver
+			where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+			      t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+			      t_deliver_capacity.plan_date > ld_plan ;
+ 
+
+
+			select che_order into ll_che
+			from t_date_che
+			where plan_date = ld_plan ; 
+
+
+			-- 修改订单状态
+			update t_order
+			set market_deliver_day = ld_plan,
+			    assign_status = '预排',
+			    che_order = ll_che +1 
+			 where order_no = ll_order_no and
+			       assign_status = '初始' and
+			       bill_type = '移库'  ; 
+
+			update t_date_che
+			set che_order =che_order +1
+			where plan_date = ld_plan ; 
+
+
+
+
+ 		end if;
+
+		insert into t_oper_order(bill_type,order_no)
+		values('移库',ll_order_no);    
+		
+  	end loop ;//对应375行
+
+	raise notice '开始 整单 %',timeofday();
+	--销售订单，检测可排量
+ 	truncate table t_oper_order ; 
+  	loop -- 对应1075行
+		select distinct about_deliver_date,request_deliver_date,plan_time,mtrl_count,order_no,
+		      street_no,series_no
+		into ld_about_deliver_date,ld_request_deliver_date,ld_plan_time,ll_mtrl_count,ll_order_no,
+		      ls_street_no,ll_series 
+		from t_order
+		where bill_type = '销售' and assign_status = '初始' and 
+		      order_no not in (select order_no from t_oper_order ) and
+		      about_deliver_date < ld_plan + interval '1 day'
+ 		order by about_deliver_date,mtrl_count desc,request_deliver_date,plan_time 
+ 		limit 1 ;
+		if not found then
+			exit;
+		end if;
+		i =i+1 ;
+		--检测可排量
+		truncate table t_order_deliver;
+		insert into t_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+		select dept_type,mtrl_no,sum(plan_integer),sum(plan_weight)
+		from t_order
+		where bill_type = '销售' and  order_no = ll_order_no and
+		      assign_status  ='初始'
+		group by dept_type,mtrl_no;
+
+		select count(1)
+		into ll_count1 
+		from t_order_deliver ;
+
+		select coalesce(sum(plan_weight),0)
+		into ll_total_weight
+		from t_order_deliver ;
+
+		select count(1) into ll_count2
+		from t_deliver_capacity,t_order_deliver
+		where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+		      t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+		      t_deliver_capacity.resi_new_qty >= t_order_deliver.plan_integer and
+		      t_deliver_capacity.plan_date  = ld_plan ; 
+		raise notice '%开始 % %',i,ll_order_no,timeofday();
+  		if ll_count1 = ll_count2 and ll_total_weight >=ll_zhengche_weight then
+		
+			--每个产品可排量足够 则排单扣除可供量，则加已经排量
+			update t_deliver_capacity
+			set used_qty = used_qty + t_order_deliver.plan_integer,
+			    resi_new_qty = resi_new_qty - t_order_deliver.plan_integer
+			 from t_order_deliver
+			where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+			      t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+			      t_deliver_capacity.plan_date =ld_plan ; 
+
+			update t_deliver_capacity
+			set st_new_qty = st_new_qty - t_order_deliver.plan_integer,
+			    resi_new_qty = resi_new_qty - t_order_deliver.plan_integer
+			 from t_order_deliver
+			where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+			      t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+			      t_deliver_capacity.plan_date > ld_plan ;
+
+
+			select che_order into ll_che
+			from t_date_che
+			where plan_date = ld_plan ; 
+
+			-- 修改订单状态
+			update t_order
+			set market_deliver_day = ld_plan,
+			    assign_status = '预排',
+			    che_order = ll_che +1
+			 where order_no = ll_order_no and
+			       assign_status = '初始';
+			
+			update t_date_che
+			set che_order =che_order +1
+			where plan_date = ld_plan ; 
+		elseif ll_count1 = ll_count2 then
+			raise notice '开始 同一地址% %',ll_order_no,timeofday();
+			--整单小于10吨，则寻找同一地址订单拼车
+		        truncate table t_oper_pinche_order ; 
+		        truncate table t_pinche_order ; 
+			loop  --对应595行
+				truncate table t_total_order_deliver ;
+				insert into t_total_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+				select dept_type,mtrl_no,plan_integer,plan_weight
+				from t_order_deliver ;
+
+				select distinct about_deliver_date, order_no
+				into ld_about_deliver_date,ll_pinche_order
+				from t_order
+				where bill_type = '销售' and assign_status = '初始' and 
+					series_no =ll_series and
+					order_no <> ll_order_no and
+					order_no not in (select order_no from t_oper_pinche_order ) and
+					about_deliver_date < ld_plan + interval '1 day'
+				order by about_deliver_date,order_no;
+				if not found then
+					exit;
+				end if ; 
+				--检测可排量
+				truncate table t_pinche_order_deliver;
+				insert into t_pinche_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+				select dept_type,mtrl_no,sum(plan_integer),sum(plan_weight)
+				from t_order
+				where bill_type = '销售' and  order_no = ll_pinche_order and
+					assign_status  ='初始'
+				group by dept_type,mtrl_no;
+
+				
+				update t_total_order_deliver
+				set plan_integer =coalesce(t_total_order_deliver.plan_integer,0) + coalesce( t_pinche_order_deliver.plan_integer,0),
+				    plan_weight =coalesce(t_total_order_deliver.plan_weight,0) + coalesce( t_pinche_order_deliver.plan_weight,0)
+				from t_pinche_order_deliver
+				where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+				       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+
+				delete from t_pinche_order_deliver using t_total_order_deliver
+				where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+				       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+				
+				insert into t_total_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+				select dept_type,mtrl_no,plan_integer,plan_weight
+				from t_pinche_order_deliver ;
+
+
+				select count(1)
+				into ll_count1 
+				from t_total_order_deliver ;
+
+				select count(1) into ll_count2
+				from t_deliver_capacity,t_total_order_deliver
+				where   t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+					t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+					t_deliver_capacity.resi_new_qty >= t_total_order_deliver.plan_integer and
+					t_deliver_capacity.plan_date  = ld_plan ; 
+
+				if ll_count1 = ll_count2 then
+					truncate table t_order_deliver;
+					insert into t_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+					select dept_type,mtrl_no,plan_integer,plan_weight
+					from t_total_order_deliver ;
+					insert into t_pinche_order (order_no,xuhao)
+					values (ll_pinche_order,0);
+				end if;
+
+				insert into t_oper_pinche_order(order_no)
+				values (ll_pinche_order);
+			    
+			end loop; --对应528行
+			raise notice '结束同一地址% %',ll_order_no,timeofday();
+			--同一地址拼车完成，判断是否大于10吨
+			select coalesce(sum(plan_weight),0)
+			into ll_total_weight
+			from t_order_deliver ;
+			
+ 			if  ll_total_weight >=ll_zhengche_weight then
+ 				--每个产品可排量足够 则排单扣除可供量，则加已经排量
+				update t_deliver_capacity
+				set used_qty = used_qty + t_order_deliver.plan_integer,
+				    resi_new_qty = resi_new_qty - t_order_deliver.plan_integer
+				from t_order_deliver
+				where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+					t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+					t_deliver_capacity.plan_date =ld_plan ; 
+
+				update t_deliver_capacity
+				set st_new_qty = st_new_qty - t_order_deliver.plan_integer,
+					resi_new_qty = resi_new_qty - t_order_deliver.plan_integer
+				from t_order_deliver
+				where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+					t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+					t_deliver_capacity.plan_date > ld_plan ;
+
+				select che_order into ll_che
+				from t_date_che
+				where plan_date = ld_plan ; 
+
+				-- 修改订单状态
+				update t_order
+				set market_deliver_day = ld_plan,
+				    assign_status = '预排',
+				    che_order = ll_che +1
+				 where order_no = ll_order_no and
+				       assign_status = '初始';
+
+				update t_order
+				set market_deliver_day = ld_plan,
+				    assign_status = '预排',
+				    che_order = ll_che +1
+				 where order_no in (select order_no from t_pinche_order) and
+				       assign_status = '初始';
+				
+				update t_date_che
+				set che_order =che_order +1
+				where plan_date = ld_plan ; 
+ 			else --同一地址无法满足10吨 找可拼车两个地址，是否到16吨，一个地址是否到10吨
+ 			         --排出寻找地址优先级
+ 			        truncate table t_pin_town_deal ;
+				insert into t_pin_town_deal(pinche_xuhao,deli_townno,pinche_town)
+				select pinche_xuhao,deli_townno,pinche_town
+				from t_pin_town 
+				where deli_townno = ls_street_no ;
+				
+				raise notice '%开始 拼车% %',i,ll_order_no,timeofday();
+				if exists (select 1 from pg_tables where tablename  = 't_pinche_series' ) then
+					truncate table t_pinche_series;
+					PERFORM  setval('t_pinche_series_xuhao_seq',1,false);
+				else
+					 create temp table t_pinche_series
+					  (
+						xuhao serial ,
+						series_no integer,
+						plan_weight numeric(20,4)
+					  )on commit drop;
+				end if;
+
+				
+				  truncate table t_pinche_series_data;
+				  truncate table t_pinche_series_temp;
+				  
+				  insert into t_pinche_series_data(pinche_xuhao,series_no,about_deliver_date,order_no)
+				  select distinct  t_pin_town_deal.pinche_xuhao,
+					   t_order.series_no,				
+				           t_order.about_deliver_date ,t_order.order_no 
+				 from t_order ,t_pin_town_deal
+				where  t_order.series_no <> ll_series and 
+				       t_order.order_no <> ll_order_no and
+				       t_order.street_no = t_pin_town_deal.pinche_town and
+				       t_order.about_deliver_date < ld_plan + interval '1 day' and
+				       t_order.assign_status = '初始' and
+				       t_order.bill_type = '销售' and
+				       t_order.street_no >''
+			         order by t_pin_town_deal.pinche_xuhao, t_order.about_deliver_date ,t_order.order_no ;
+				 
+				 
+				  insert into t_pinche_series_temp(series_no,xuhao)
+				  select series_no,min(xuhao) 
+				  from t_pinche_series_data
+				  group by series_no ;
+
+				  insert into t_pinche_series(series_no)
+				  select series_no
+				  from t_pinche_series_temp
+				  order by xuhao;
+				
+				  select count(1) into ll_count from t_pinche_series ; 
+				  <<outloop>>
+				  for ll_i in 1..ll_count  LOOP
+					
+					select series_no into ll_pinche_series from t_pinche_series where xuhao =ll_i ;
+					--记录初始可供
+					truncate table t_oper_pinche_order ; 
+					delete from t_pinche_order
+					where xuhao in (1,2);
+					truncate table t_total_order_deliver;
+					insert into t_total_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+					select dept_type,mtrl_no,plan_integer,plan_weight
+					from t_order_deliver ;
+					loop
+						select distinct about_deliver_date, order_no
+						into ld_about_deliver_date,ll_pinche_order
+						from t_order
+						where	bill_type = '销售' and assign_status = '初始' and 
+							series_no =ll_pinche_series and
+							order_no <> ll_order_no and
+							order_no not in (select order_no from t_oper_pinche_order ) and
+							about_deliver_date < ld_plan + interval '1 day'
+						order by about_deliver_date,order_no;
+						if not found then
+							exit;
+						end if ; 
+						--检测可排量
+						truncate table t_pinche_order_deliver;
+						insert into t_pinche_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+						select dept_type,mtrl_no,sum(plan_integer),sum(plan_weight)
+						from t_order
+						where bill_type = '销售' and  order_no = ll_pinche_order and
+							assign_status  ='初始'
+						group by dept_type,mtrl_no;
+
+						update t_total_order_deliver
+						set plan_integer =coalesce(t_total_order_deliver.plan_integer,0) + coalesce( t_pinche_order_deliver.plan_integer,0),
+						    plan_weight =coalesce(t_total_order_deliver.plan_weight,0) + coalesce( t_pinche_order_deliver.plan_weight,0)
+						from t_pinche_order_deliver
+						where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+						       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+
+						delete from t_pinche_order_deliver using t_total_order_deliver
+						where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+						       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+						
+						insert into t_total_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+						select dept_type,mtrl_no,plan_integer,plan_weight
+						from t_pinche_order_deliver ;
+
+						select count(1)
+						into ll_count1 
+						from t_total_order_deliver ;
+
+						select count(1) into ll_count2
+						from t_deliver_capacity,t_total_order_deliver
+						where   t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+							t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+							t_deliver_capacity.resi_new_qty >= t_total_order_deliver.plan_integer and
+							t_deliver_capacity.plan_date  = ld_plan ; 
+							
+						if ll_count1 = ll_count2 then
+							insert into t_pinche_order (order_no,xuhao)
+							values (ll_pinche_order,1);
+						else
+						        --恢复初始可供
+							update t_total_order_deliver
+							set plan_integer =coalesce(t_total_order_deliver.plan_integer,0) - coalesce( t_pinche_order_deliver.plan_integer,0),
+							    plan_weight =coalesce(t_total_order_deliver.plan_weight,0) - coalesce( t_pinche_order_deliver.plan_weight,0)
+							from  t_pinche_order_deliver
+							where  t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+							       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+
+						end if;
+						insert into t_oper_pinche_order(order_no)
+						values (ll_pinche_order);
+					end loop;
+					for ll_j in ll_i + 1..ll_count loop
+						select series_no into ll_pinche_series1 from t_pinche_series where xuhao =ll_j ;
+						
+						loop
+
+							select distinct about_deliver_date order_no
+							into ld_about_deliver_date,ll_pinche_order
+							from t_order
+							where	bill_type = '销售' and assign_status = '初始' and 
+								series_no =ll_pinche_series1 and
+								order_no <> ll_order_no and
+								order_no not in (select order_no from t_oper_pinche_order ) and
+								about_deliver_date < ld_plan + interval '1 day'
+							order by about_deliver_date,order_no;
+							if not found then
+								exit;
+							end if ; 
+							--检测可排量
+							truncate table t_pinche_order_deliver;
+							insert into t_pinche_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+							select dept_type,mtrl_no,sum(plan_integer),sum(plan_weight)
+							from t_order
+							where bill_type = '销售' and  order_no = ll_pinche_order and
+								assign_status  ='初始'
+							group by dept_type,mtrl_no;
+
+							update t_total_order_deliver
+							set plan_integer =coalesce(t_total_order_deliver.plan_integer,0) + coalesce( t_pinche_order_deliver.plan_integer,0),
+							    plan_weight =coalesce(t_total_order_deliver.plan_weight,0) + coalesce( t_pinche_order_deliver.plan_weight,0)
+							from t_pinche_order_deliver
+							where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+							       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+
+							delete from t_pinche_order_deliver using t_total_order_deliver
+							where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+							       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+							
+							insert into t_total_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+							select dept_type,mtrl_no,plan_integer,plan_weight
+							from t_pinche_order_deliver ;
+
+							select count(1)
+							into ll_count1 
+							from t_total_order_deliver ;
+
+							select count(1) into ll_count2
+							from t_deliver_capacity,t_total_order_deliver
+							where   t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+								t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+								t_deliver_capacity.resi_new_qty >= t_total_order_deliver.plan_integer and
+								t_deliver_capacity.plan_date  = ld_plan ; 
+							if ll_count1 = ll_count2 then
+								insert into t_pinche_order (order_no,xuhao)
+								values (ll_pinche_order,2);
+							else
+								 --恢复初始可供
+								update t_total_order_deliver
+								set plan_integer =coalesce(t_total_order_deliver.plan_integer,0) - coalesce( t_pinche_order_deliver.plan_integer,0),
+								    plan_weight =coalesce(t_total_order_deliver.plan_weight,0) - coalesce( t_pinche_order_deliver.plan_weight,0)
+								from  t_pinche_order_deliver
+								where  t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+								       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+
+							end if;
+							insert into t_oper_pinche_order(order_no)
+							values (ll_pinche_order);
+						end loop;
+						select coalesce(sum(plan_weight),0)
+						into ll_total_weight
+						from t_total_order_deliver ;
+						if  ll_total_weight >=ll_zhengche_weight3 then
+							--每个产品可排量足够 则排单扣除可供量，则加已经排量
+							update t_deliver_capacity
+							set used_qty = used_qty + t_total_order_deliver.plan_integer,
+							    resi_new_qty = resi_new_qty - t_total_order_deliver.plan_integer
+							from t_total_order_deliver
+							where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+								t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+								t_deliver_capacity.plan_date =ld_plan ; 
+
+							update t_deliver_capacity
+							set st_new_qty = st_new_qty - t_total_order_deliver.plan_integer,
+								resi_new_qty = resi_new_qty - t_total_order_deliver.plan_integer
+							from t_total_order_deliver
+							where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+								t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+								t_deliver_capacity.plan_date > ld_plan ;
+
+							select che_order into ll_che
+							from t_date_che
+							where plan_date = ld_plan ; 
+
+							-- 修改订单状态
+							update t_order
+							set market_deliver_day = ld_plan,
+							    assign_status = '预排',
+							    che_order = ll_che +1
+							 where order_no = ll_order_no and
+							       assign_status = '初始';
+
+							update t_order
+							set market_deliver_day = ld_plan,
+							    assign_status = '预排',
+							    che_order = ll_che +1
+							 where order_no in (select order_no from t_pinche_order) and
+							       assign_status = '初始';
+							
+							update t_date_che
+							set che_order =che_order +1
+							where plan_date = ld_plan ; 
+							exit outloop;
+						else
+							select sum(plan_weight) into ll_total_weight
+							from t_order
+							where bill_type = '销售' and  order_no = ll_order_no and
+								assign_status  ='初始' ;
+
+							--同一地址拼车部分
+							select sum(plan_weight) into ll_total_weight0
+							from t_order
+							where bill_type = '销售' and   order_no in (select order_no from t_pinche_order where xuhao =0) and
+								assign_status  ='初始' ;
+
+							ll_total_weight =  coalesce(ll_total_weight,0) + coalesce(ll_total_weight0,0);
+
+							select sum(plan_weight) into ll_total_weight1
+							from t_order
+							where bill_type = '销售' and  order_no in (select order_no from t_pinche_order where xuhao =1) and
+								assign_status  ='初始' ;
+							select sum(plan_weight) into ll_total_weight2
+							from t_order
+							where bill_type = '销售' and  order_no in (select order_no from t_pinche_order where xuhao =2) and
+								assign_status  ='初始' ;
+							if ll_total_weight + ll_total_weight1 >= ll_zhengche_weight then
+								truncate table t_pinche_order_deliver;
+								insert into t_pinche_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+								select dept_type,mtrl_no,sum(plan_integer),sum(plan_weight)
+								from t_order
+								where bill_type = '销售' and order_no in (select order_no from t_pinche_order where xuhao =2) and
+									assign_status  ='初始'
+								group by dept_type,mtrl_no;
+
+								update t_total_order_deliver
+								set plan_integer = t_total_order_deliver.plan_integer - t_pinche_order_deliver.plan_integer,
+								    plan_weight = t_total_order_deliver.plan_weight - t_pinche_order_deliver.plan_weight
+								from t_pinche_order_deliver
+								where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+								      t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+									
+
+								update t_deliver_capacity
+								set used_qty = used_qty + t_total_order_deliver.plan_integer,
+								    resi_new_qty = resi_new_qty - t_total_order_deliver.plan_integer
+								from t_total_order_deliver
+								where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+									t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+									t_deliver_capacity.plan_date =ld_plan ; 
+
+								update t_deliver_capacity
+								set st_new_qty = st_new_qty - t_total_order_deliver.plan_integer,
+								    resi_new_qty = resi_new_qty - t_total_order_deliver.plan_integer
+								from t_total_order_deliver
+								where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+									t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+									t_deliver_capacity.plan_date > ld_plan ;
+
+								select che_order into ll_che
+								from t_date_che
+								where plan_date = ld_plan ; 
+
+								-- 修改订单状态
+								update t_order
+								set market_deliver_day = ld_plan,
+								    assign_status = '预排',
+								    che_order = ll_che +1
+								 where order_no = ll_order_no and
+								       assign_status = '初始';
+
+								update t_order
+								set market_deliver_day = ld_plan,
+								    assign_status = '预排',
+								    che_order = ll_che +1
+								 where order_no in (select order_no from t_pinche_order where xuhao in (0,1)) and
+								       assign_status = '初始';
+								
+								update t_date_che
+								set che_order =che_order +1
+								where plan_date = ld_plan ; 
+								exit outloop;
+							else
+							    if ll_total_weight +ll_total_weight2 >=ll_zhengche_weight then
+								truncate table t_pinche_order_deliver;
+								insert into t_pinche_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+								select dept_type,mtrl_no,sum(plan_integer),sum(plan_weight)
+								from t_order
+								where bill_type = '销售' and order_no in (select order_no from t_pinche_order where xuhao =1) and
+									assign_status  ='初始'
+								group by dept_type,mtrl_no;
+
+								update t_total_order_deliver
+								set plan_integer = t_total_order_deliver.plan_integer - t_pinche_order_deliver.plan_integer,
+								    plan_weight = t_total_order_deliver.plan_weight - t_pinche_order_deliver.plan_weight
+								from t_pinche_order_deliver
+								where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+								      t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+									
+
+								update t_deliver_capacity
+								set used_qty = used_qty + t_total_order_deliver.plan_integer,
+								    resi_new_qty = resi_new_qty - t_total_order_deliver.plan_integer
+								from t_total_order_deliver
+								where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+									t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+									t_deliver_capacity.plan_date =ld_plan ; 
+
+								update t_deliver_capacity
+								set st_new_qty = st_new_qty - t_total_order_deliver.plan_integer,
+								    resi_new_qty = resi_new_qty - t_total_order_deliver.plan_integer
+								from t_total_order_deliver
+								where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+									t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+									t_deliver_capacity.plan_date > ld_plan ;
+
+								select che_order into ll_che
+								from t_date_che
+								where plan_date = ld_plan ; 
+
+								-- 修改订单状态
+								update t_order
+								set market_deliver_day = ld_plan,
+								    assign_status = '预排',
+								    che_order = ll_che +1
+								 where order_no = ll_order_no and
+								       assign_status = '初始';
+
+								update t_order
+								set market_deliver_day = ld_plan,
+								    assign_status = '预排',
+								    che_order = ll_che +1
+								 where order_no in (select order_no from t_pinche_order where xuhao in (0,2)) and
+								       assign_status = '初始';
+								
+								update t_date_che
+								set che_order =che_order +1
+								where plan_date = ld_plan ;
+								exit outloop;
+							    end if;
+							end if;
+						end if ;
+
+					end loop;--第二个地址
+					--判断是否十吨
+					if ll_count = 1 then
+					     select coalesce(sum(plan_weight),0)
+					      into ll_total_weight
+					     from t_total_order_deliver ;
+					    if ll_total_weight  >=ll_zhengche_weight then
+
+						update t_deliver_capacity
+						set used_qty = used_qty + t_total_order_deliver.plan_integer,
+						    resi_new_qty = resi_new_qty - t_total_order_deliver.plan_integer
+						from t_total_order_deliver
+						where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+							t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+							t_deliver_capacity.plan_date =ld_plan ; 
+
+						update t_deliver_capacity
+						set st_new_qty = st_new_qty - t_total_order_deliver.plan_integer,
+						    resi_new_qty = resi_new_qty - t_total_order_deliver.plan_integer
+						from t_total_order_deliver
+						where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+							t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+							t_deliver_capacity.plan_date > ld_plan ;
+
+						select che_order into ll_che
+						from t_date_che
+						where plan_date = ld_plan ; 
+
+						-- 修改订单状态
+						update t_order
+						set market_deliver_day = ld_plan,
+						    assign_status = '预排',
+						    che_order = ll_che +1
+						 where order_no = ll_order_no and
+						       assign_status = '初始';
+
+						update t_order
+						set market_deliver_day = ld_plan,
+						    assign_status = '预排',
+						    che_order = ll_che +1
+						 where order_no in (select order_no from t_pinche_order ) and
+						       assign_status = '初始';
+						
+						update t_date_che
+						set che_order =che_order +1
+						where plan_date = ld_plan ;
+						exit;
+					    end if;
+					end if;
+				  end loop;--第一个地址
+	
+ 			end if ;--同一地址拼车
+ 
+ 		end if;--单个订单不存十吨
+
+		insert into t_oper_order(bill_type,order_no)
+		values('销售',ll_order_no);    
+		
+  	end loop ;	
+	 raise notice '开始捡漏 % ',timeofday();
+	if exists (select 1 	from t_order	where bill_type = '销售' and 
+						assign_status  ='初始' and
+						about_deliver_date < ld_plan + interval '1 day') then
+
+		for rs in 	select	t_order.che_order,count(distinct series_no),
+					sum(t_order.plan_weight) as plan_weight
+		from t_order
+		where bill_type = '销售' and 
+		     che_order >0 
+		group by t_order.che_order
+		having count(distinct series_no) =1
+		order by t_order.che_order
+ 		loop -- 对应1196行	
+			select distinct  series_no,street_no into ll_series,ls_street_no
+			 from t_order
+			 where  t_order.che_order = rs.che_order ;
+
+
+			truncate table t_pin_town_deal ;
+			insert into t_pin_town_deal(pinche_xuhao,deli_townno,pinche_town)
+			select pinche_xuhao,deli_townno,pinche_town
+			from t_pin_town 
+			where deli_townno = ls_street_no ;
+
+			  truncate table t_pinche_series_data;
+			   truncate table t_pinche_series_temp;
+			  insert into t_pinche_series_data(pinche_xuhao,series_no,about_deliver_date,order_no)
+			  select distinct  t_pin_town_deal.pinche_xuhao,
+				   t_order.series_no,				
+				   t_order.about_deliver_date ,t_order.order_no 
+			 from t_order ,t_pin_town_deal
+			where  t_order.street_no = t_pin_town_deal.pinche_town and
+			       t_order.assign_status = '初始' and
+			       bill_type = '销售' and
+			       t_order.about_deliver_date < ld_plan + interval '1 day'
+			 order by t_pin_town_deal.pinche_xuhao, t_order.about_deliver_date ,t_order.order_no ;
+			  insert into t_pinche_series_temp(series_no,xuhao)
+			  select series_no,min(xuhao) 
+			  from t_pinche_series_data
+			  group by series_no ;
+			  truncate table t_pinche_series;
+			  insert into t_pinche_series(series_no)
+			  select series_no
+			  from t_pinche_series_temp
+			  order by xuhao;
+			  insert into t_pinche_series(series_no,xuhao)
+			  values(ll_series,0) ; 
+			for rs2 in select * from t_pinche_series order by xuhao//从此开始   
+			loop
+				truncate table t_oper_pinche_order ; 
+
+				loop
+					select distinct about_deliver_date ,order_no
+					into ld_about_deliver_date,ll_pinche_order
+					from t_order
+					where bill_type = '销售' and assign_status = '初始' and 
+						series_no =rs2.series_no and
+						order_no not in (select order_no from t_oper_pinche_order ) and
+						about_deliver_date < ld_plan + interval '1 day'
+					order by about_deliver_date,order_no;
+					if not found then
+						exit;
+					end if ; 
+					--检测可排量
+					truncate table t_order_deliver;
+					insert into t_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+					select dept_type,mtrl_no,sum(plan_integer),sum(plan_weight)
+					from t_order
+					where bill_type = '销售' and  order_no = ll_pinche_order and
+						assign_status  ='初始'
+					group by dept_type,mtrl_no;
+
+			
+
+					select count(1)
+					into ll_count1 
+					from t_order_deliver ;
+
+
+					select count(1) into ll_count2
+					from t_deliver_capacity,t_order_deliver
+					where   t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+						t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+						t_deliver_capacity.resi_new_qty >= t_order_deliver.plan_integer and
+						t_deliver_capacity.plan_date  = ld_plan ; 
+
+					if ll_count1 = ll_count2 then
+
+						update t_deliver_capacity
+						set used_qty = used_qty + t_order_deliver.plan_integer,
+						    resi_new_qty = resi_new_qty - t_order_deliver.plan_integer
+						from t_order_deliver
+						where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+							t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+							t_deliver_capacity.plan_date =ld_plan ; 
+
+						update t_deliver_capacity
+						set st_new_qty = st_new_qty - t_order_deliver.plan_integer,
+						    resi_new_qty = resi_new_qty - t_order_deliver.plan_integer
+						from t_order_deliver
+						where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+							t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+							t_deliver_capacity.plan_date > ld_plan ;
+
+						update t_order
+						set market_deliver_day = ld_plan,
+						    assign_status = '预排',
+						    che_order = rs.che_order
+						 where order_no = ll_pinche_order and
+						       assign_status = '初始' and
+						       bill_type = '销售'  ;
+
+					end if;
+
+				insert into t_oper_pinche_order(order_no)
+				values (ll_pinche_order);
+			    end loop;
+			end loop;
+
+ 		end loop;
+	end if;
+	 raise notice '结束捡漏 % ',timeofday();
+ 	 if as_diff = '1' then
+		--散弹拼车，批发商不拆单
+		truncate table t_oper_order ; 
+		loop -- 对应2023行
+			select distinct about_deliver_date,request_deliver_date,plan_time,mtrl_count,order_no,
+			      street_no,series_no
+			into ld_about_deliver_date,ld_request_deliver_date,ld_plan_time,ll_mtrl_count,ll_order_no,
+			      ls_street_no,ll_series 
+			from t_order
+			where bill_type = '销售' and assign_status = '初始' and 
+			      order_no not in (select order_no from t_oper_order ) and
+			      about_deliver_date < ld_plan + interval '1 day' and
+			      coalesce(pifa_customer ,'') = ''
+			order by about_deliver_date,mtrl_count desc,request_deliver_date,plan_time 
+			limit 1 ;
+			if not found then
+				exit;
+			end if;
+
+			--检测可排量
+			truncate table t_order_deliver;
+			insert into t_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+			select dept_type,mtrl_no,sum(plan_integer),sum(plan_weight)
+			from t_order
+			where bill_type = '销售' and  order_no = ll_order_no and
+			      assign_status  ='初始'
+			group by dept_type,mtrl_no;
+
+			update t_order_deliver
+			set can_deliver = 1
+			from  t_deliver_capacity
+			where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+			      t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+			      t_deliver_capacity.resi_new_qty > t_order_deliver.plan_integer and
+			      t_deliver_capacity.plan_date  = ld_plan ; 
+
+			delete from t_order_deliver where can_deliver = 0;
+
+
+			select coalesce(sum(plan_weight),0)
+			into ll_total_weight
+			from t_order_deliver ;
+
+			
+			truncate table t_pinche_order_item ;
+			insert into t_pinche_order_item(order_no,item_no)
+			select distinct order_no,order_itemno
+			from t_order,t_order_deliver
+			where t_order.order_no = ll_order_no and
+			      t_order.assign_status  ='初始' and
+			      t_order.dept_type = t_order_deliver.dept_type and
+			      t_order.mtrl_no = t_order_deliver.mtrl_no ;
+
+			      
+			truncate table t_pinche_order ; 
+			insert into t_pinche_order (order_no,item_no,xuhao)
+			select order_no,item_no,0
+			from t_pinche_order_item ; 
+
+			select count(1) into ll_count from t_pinche_order ; 
+
+			if  ll_count > 0 and ll_total_weight >=ll_zhengche_weight then
+		
+				--每个产品可排量足够 则排单扣除可供量，则加已经排量
+				update t_deliver_capacity
+				set used_qty = used_qty + t_order_deliver.plan_integer,
+				    resi_new_qty = resi_new_qty - t_order_deliver.plan_integer
+				 from t_order_deliver
+				where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+				      t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+				      t_deliver_capacity.plan_date =ld_plan ; 
+
+				update t_deliver_capacity
+				set st_new_qty = st_new_qty - t_order_deliver.plan_integer,
+				    resi_new_qty = resi_new_qty - t_order_deliver.plan_integer
+				 from t_order_deliver
+				where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+				      t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+				      t_deliver_capacity.plan_date > ld_plan ;
+
+
+				select che_order into ll_che
+				from t_date_che
+				where plan_date = ld_plan ; 
+
+				-- 修改订单状态
+				update t_order
+				set market_deliver_day = ld_plan,
+				    assign_status = '预排',
+				    che_order = ll_che +1
+				 from t_pinche_order_item
+				 where t_order.order_no = t_pinche_order_item.order_no and
+				       t_order.order_itemno = t_pinche_order_item.item_no ;
+		
+				update t_date_che
+				set che_order =che_order +1
+				where plan_date = ld_plan ; 
+
+			elseif  ll_count > 0 then--整单小于10吨，则寻找同一地址订单拼车
+				truncate table t_oper_pinche_order ; 
+				loop
+					truncate table t_total_order_deliver ; --合计已经排数量和吨位
+					insert into t_total_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+					select dept_type,mtrl_no,plan_integer,plan_weight
+					from t_order_deliver ;
+
+					select distinct about_deliver_date, order_no,pifa_customer
+					into ld_about_deliver_date,ll_pinche_order,ls_pifa_customer
+					from t_order
+					where bill_type = '销售' and assign_status = '初始' and 
+						series_no =ll_series and
+						order_no <> ll_order_no and
+						order_no not in (select order_no from t_oper_pinche_order ) and
+						about_deliver_date < ld_plan + interval '1 day'
+					order by about_deliver_date,order_no,pifa_customer;
+					if not found then
+						exit;
+					end if ; 
+					if ls_pifa_customer >'' then 
+						--检测可排量
+						truncate table t_pinche_order_deliver;
+						insert into t_pinche_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+						select dept_type,mtrl_no,sum(plan_integer),sum(plan_weight)
+						from t_order
+						where bill_type = '销售' and  order_no = ll_pinche_order and
+							assign_status  ='初始'
+						group by dept_type,mtrl_no;
+
+						
+						update t_total_order_deliver
+						set plan_integer =coalesce(t_total_order_deliver.plan_integer,0) + coalesce( t_pinche_order_deliver.plan_integer,0),
+						    plan_weight = coalesce(t_total_order_deliver.plan_weight,0) + coalesce( t_pinche_order_deliver.plan_weight,0)
+						from t_pinche_order_deliver
+						where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+						       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+
+						delete from t_pinche_order_deliver using t_total_order_deliver
+						where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+						       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+						
+						insert into t_total_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+						select dept_type,mtrl_no,plan_integer,plan_weight
+						from t_pinche_order_deliver ;
+
+
+						select count(1)
+						into ll_count1 
+						from t_total_order_deliver ;
+
+						select count(1) into ll_count2
+						from t_deliver_capacity,t_total_order_deliver
+						where   t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+							t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+							t_deliver_capacity.resi_new_qty >= t_total_order_deliver.plan_integer and
+							t_deliver_capacity.plan_date  = ld_plan ; 
+
+						if ll_count1 = ll_count2 then
+							truncate table t_order_deliver;
+							insert into t_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+							select dept_type,mtrl_no,plan_integer,plan_weight
+							from t_total_order_deliver ;
+							insert into t_pinche_order (order_no,item_no,xuhao)
+							select order_no,order_itemno,0
+							from t_order
+							where bill_type = '销售' and  order_no = ll_pinche_order and
+								assign_status  ='初始' ;
+						end if;
+					else
+						--检测可排量
+						truncate table t_pinche_order_deliver;
+						insert into t_pinche_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+						select dept_type,mtrl_no,sum(plan_integer),sum(plan_weight)
+						from t_order
+						where bill_type = '销售' and  order_no = ll_pinche_order and
+							assign_status  ='初始'
+						group by dept_type,mtrl_no;
+
+						
+						update t_total_order_deliver
+						set plan_integer =coalesce(t_total_order_deliver.plan_integer,0) + coalesce( t_pinche_order_deliver.plan_integer,0),
+						    plan_weight = coalesce(t_total_order_deliver.plan_weight,0) + coalesce( t_pinche_order_deliver.plan_weight,0)
+						from t_pinche_order_deliver
+						where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+						       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+
+						delete from t_pinche_order_deliver using t_total_order_deliver
+						where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+						       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+						
+						insert into t_total_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+						select dept_type,mtrl_no,plan_integer,plan_weight
+						from t_pinche_order_deliver ;
+
+						update t_total_order_deliver
+						set can_deliver = 1
+						from  t_deliver_capacity
+						where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+						      t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+						      t_deliver_capacity.resi_new_qty > t_total_order_deliver.plan_integer and
+						      t_deliver_capacity.plan_date  = ld_plan ; 
+
+						
+						truncate table t_pinche_order_item ;
+						insert into t_pinche_order_item(order_no,item_no)
+						select distinct order_no,order_itemno
+						from t_order,t_total_order_deliver
+						where t_order.order_no = ll_pinche_order and
+						      t_order.assign_status  ='初始' and
+						      t_order.dept_type = t_total_order_deliver.dept_type and
+						      t_order.mtrl_no = t_total_order_deliver.mtrl_no  and
+						      t_total_order_deliver.can_deliver = 1;
+						
+
+						update t_total_order_deliver
+						set plan_integer =coalesce(t_total_order_deliver.plan_integer,0) - coalesce( t_pinche_order_deliver.plan_integer,0),
+						    plan_weight =coalesce(t_total_order_deliver.plan_weight,0) - coalesce( t_pinche_order_deliver.plan_weight,0)
+						from t_pinche_order_deliver
+						where  t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+						       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no  and
+						       t_total_order_deliver.can_deliver = 0;
+
+						select count(1) into ll_count1 from t_pinche_order_item ;
+						if ll_count1 >0 then
+							truncate table t_order_deliver;
+							insert into t_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+							select dept_type,mtrl_no,plan_integer,plan_weight
+							from t_total_order_deliver ;
+
+							insert into t_pinche_order (order_no,item_no,xuhao)
+							select order_no,item_no,0
+							from t_pinche_order_item ; 
+						end if;
+					end if;
+
+
+					insert into t_oper_pinche_order(order_no)
+					values (ll_pinche_order);
+				    
+				end loop;
+
+				--同一地址拼车完成，判断是否大于10吨
+				select coalesce(sum(plan_weight),0)
+				into ll_total_weight
+				from t_order_deliver ;
+				if  ll_total_weight >=ll_zhengche_weight then
+					--每个产品可排量足够 则排单扣除可供量，则加已经排量
+					update t_deliver_capacity
+					set used_qty = used_qty + t_order_deliver.plan_integer,
+					    resi_new_qty = resi_new_qty - t_order_deliver.plan_integer
+					from t_order_deliver
+					where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+						t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+						t_deliver_capacity.plan_date =ld_plan ; 
+
+					update t_deliver_capacity
+					set st_new_qty = st_new_qty - t_order_deliver.plan_integer,
+						resi_new_qty = resi_new_qty - t_order_deliver.plan_integer
+					from t_order_deliver
+					where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+						t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+						t_deliver_capacity.plan_date > ld_plan ;
+
+					select che_order into ll_che
+					from t_date_che
+					where plan_date = ld_plan ; 
+
+					-- 修改订单状态
+					update t_order
+					set market_deliver_day = ld_plan,
+					    assign_status = '预排',
+					    che_order = ll_che +1
+					 from t_pinche_order
+					 where t_order.order_no = t_pinche_order.order_no and
+					       t_order.order_itemno = t_pinche_order.item_no and
+					       assign_status = '初始';
+					
+					update t_date_che
+					set che_order =che_order +1
+					where plan_date = ld_plan ; 
+				else --同一地址无法满足10吨 找可拼车两个地址，是否到16吨，一个地址是否到10吨
+					 --排出寻找地址优先级
+					truncate table t_pin_town_deal ;
+					insert into t_pin_town_deal(pinche_xuhao,deli_townno,pinche_town)
+					select pinche_xuhao,deli_townno,pinche_town
+					from t_pin_town 
+					where deli_townno = ls_street_no ;
+					if exists (select 1 from pg_tables where tablename  = 't_pinche_series' ) then
+						truncate table t_pinche_series;
+						PERFORM  setval('t_pinche_series_xuhao_seq',1,false);
+					else
+						 create temp table t_pinche_series
+						  (
+							xuhao serial ,
+							series_no integer,
+							plan_weight numeric(20,4)
+						  )on commit drop;
+					end if;
+
+
+					  truncate table t_pinche_series_data ; 
+					  truncate table t_pinche_series_temp ;
+					  insert into t_pinche_series_data(pinche_xuhao,series_no,about_deliver_date,order_no)
+					  select distinct  t_pin_town_deal.pinche_xuhao,
+						   t_order.series_no,				
+						   t_order.about_deliver_date ,t_order.order_no 
+					 from t_order ,t_pin_town_deal
+					where  t_order.series_no <> ll_series and 
+					       t_order.order_no <> ll_order_no and
+					       t_order.street_no = t_pin_town_deal.pinche_town and
+					       t_order.assign_status = '初始' and
+					       t_order.about_deliver_date < ld_plan + interval '1 day'
+					 order by t_pin_town_deal.pinche_xuhao, t_order.about_deliver_date ,t_order.order_no ;
+					  insert into t_pinche_series_temp(series_no,xuhao)
+					  select series_no,min(xuhao) 
+					  from t_pinche_series_data
+					  group by series_no ;
+
+					  insert into t_pinche_series(series_no)
+					  select series_no
+					  from t_pinche_series_temp
+					  order by xuhao;
+					 truncate table t_oper_pinche_order ; 
+					  select count(1) into ll_count from t_pinche_series ; 
+					  <<outloop1>>
+					  for ll_i in 1..ll_count  LOOP
+						
+						select series_no into ll_pinche_series from t_pinche_series where xuhao =ll_i ;
+						delete from t_pinche_order
+						where xuhao in (1,2) ;
+						--记录初始可供
+						truncate table t_oper_pinche_order ; 
+						truncate table t_total_order_deliver;
+						insert into t_total_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+						select dept_type,mtrl_no,plan_integer,plan_weight
+						from t_order_deliver ;
+						loop
+							select distinct about_deliver_date ,order_no,pifa_customer
+							into ld_about_deliver_date,ll_pinche_order,ls_pifa_customer
+							from t_order
+							where	bill_type = '销售' and assign_status = '初始' and 
+								series_no =ll_pinche_series and
+								order_no <> ll_order_no and
+								order_no not in (select order_no from t_oper_pinche_order ) and
+								about_deliver_date < ld_plan + interval '1 day'
+							order by about_deliver_date,order_no;
+							if not found then
+								exit;
+							end if ; 
+							if ls_pifa_customer >'' then
+								--检测可排量
+								truncate table t_pinche_order_deliver;
+								insert into t_pinche_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+								select dept_type,mtrl_no,sum(plan_integer),sum(plan_weight)
+								from t_order
+								where bill_type = '销售' and  order_no = ll_pinche_order and
+									assign_status  ='初始'
+								group by dept_type,mtrl_no;
+
+								update t_total_order_deliver
+								set plan_integer =coalesce(t_total_order_deliver.plan_integer,0) + coalesce( t_pinche_order_deliver.plan_integer,0),
+								    plan_weight =coalesce(t_total_order_deliver.plan_weight,0) + coalesce( t_pinche_order_deliver.plan_weight,0)
+								from t_pinche_order_deliver
+								where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+								       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+
+								delete from t_pinche_order_deliver using t_total_order_deliver
+								where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+								       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+								
+								insert into t_total_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+								select dept_type,mtrl_no,plan_integer,plan_weight
+								from t_pinche_order_deliver ;
+
+								select count(1)
+								into ll_count1 
+								from t_total_order_deliver;
+
+								select count(1) into ll_count2
+								from t_deliver_capacity,t_total_order_deliver
+								where   t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+									t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+									t_deliver_capacity.resi_new_qty >= t_total_order_deliver.plan_integer and
+									t_deliver_capacity.plan_date  = ld_plan ; 
+								if ll_count1 = ll_count2 then
+									insert into t_pinche_order (order_no,item_no,xuhao)
+									select order_no,order_itemno,1
+									from t_order
+									where bill_type = '销售' and 
+									       order_no = ll_pinche_order and
+									       assign_status  ='初始' ;	
+								else
+									--恢复初始可供
+									update t_total_order_deliver
+									set plan_integer =coalesce(t_total_order_deliver.plan_integer,0) - coalesce( t_pinche_order_deliver.plan_integer,0),
+									    plan_weight =coalesce(t_total_order_deliver.plan_weight,0) - coalesce( t_pinche_order_deliver.plan_weight,0)
+									from  t_pinche_order_deliver
+									where  t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+									       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+
+								end if;
+							else --经销商订单
+								--检测可排量
+								truncate table t_pinche_order_deliver;
+								insert into t_pinche_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+								select dept_type,mtrl_no,sum(plan_integer),sum(plan_weight)
+								from t_order
+								where bill_type = '销售' and  order_no = ll_pinche_order and
+									assign_status  ='初始'
+								group by dept_type,mtrl_no;
+
+								update t_total_order_deliver
+								set plan_integer =coalesce(t_total_order_deliver.plan_integer,0) + coalesce( t_pinche_order_deliver.plan_integer,0),
+								    plan_weight =coalesce(t_total_order_deliver.plan_weight,0) + coalesce( t_pinche_order_deliver.plan_weight,0)
+								from t_pinche_order_deliver
+								where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+								       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+
+								delete from t_pinche_order_deliver using t_total_order_deliver
+								where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+								       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+								
+								insert into t_total_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+								select dept_type,mtrl_no,plan_integer,plan_weight
+								from t_pinche_order_deliver ;
+
+								update t_total_order_deliver
+								set can_deliver = 1
+								from  t_deliver_capacity
+								where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+								      t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+								      t_deliver_capacity.resi_new_qty > t_total_order_deliver.plan_integer and
+								      t_deliver_capacity.plan_date  = ld_plan ; 
+
+								truncate table t_pinche_order_item ;
+								insert into t_pinche_order_item(order_no,item_no)
+								select distinct order_no,order_itemno
+								from t_order,t_total_order_deliver
+								where t_order.order_no = ll_pinche_order and
+								      t_order.assign_status  ='初始' and
+								      t_order.dept_type = t_total_order_deliver.dept_type and
+								      t_order.mtrl_no = t_total_order_deliver.mtrl_no  and
+								      t_total_order_deliver.can_deliver = 1;
+								--可供不足产品恢复可供					
+								update t_total_order_deliver
+								set plan_integer =coalesce(t_total_order_deliver.plan_integer,0) - coalesce( t_pinche_order_deliver.plan_integer,0),
+								    plan_weight =coalesce(t_total_order_deliver.plan_weight,0) - coalesce( t_pinche_order_deliver.plan_weight,0)
+								from t_pinche_order_deliver
+								where  t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+								       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no  and
+								       t_total_order_deliver.can_deliver = 0;
+
+								select count(1) into ll_count1 from t_pinche_order_item ;
+
+								if ll_count1 >0 then
+									insert into t_pinche_order (order_no,item_no,xuhao)
+									select order_no,item_no,1
+									from t_pinche_order_item ; 
+								end if;
+
+							end if;	
+							insert into t_oper_pinche_order(order_no)
+							values (ll_pinche_order);
+						end loop;
+						for ll_j in ll_i + 1..ll_count loop
+							select series_no into ll_pinche_series1 from t_pinche_series where xuhao =ll_j ;
+							
+							loop
+
+								select distinct about_deliver_date, order_no,pifa_customer
+								into ld_about_deliver_date,ll_pinche_order,ls_pifa_customer
+								from t_order
+								where	bill_type = '销售' and assign_status = '初始' and 
+									series_no =ll_pinche_series1 and
+									order_no <> ll_order_no and
+									order_no not in (select order_no from t_oper_pinche_order ) and
+									about_deliver_date < ld_plan + interval '1 day'
+								order by about_deliver_date,order_no;
+								if not found then
+									exit;
+								end if ; 
+								if ls_pifa_customer >'' then
+									--检测可排量
+									truncate table t_pinche_order_deliver;
+									insert into t_pinche_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+									select dept_type,mtrl_no,sum(plan_integer),sum(plan_weight)
+									from t_order
+									where bill_type = '销售' and  order_no = ll_pinche_order and
+										assign_status  ='初始'
+									group by dept_type,mtrl_no;
+
+									update t_total_order_deliver
+									set plan_integer =coalesce(t_total_order_deliver.plan_integer,0) + coalesce( t_pinche_order_deliver.plan_integer,0),
+									    plan_weight =coalesce(t_total_order_deliver.plan_weight,0) + coalesce( t_pinche_order_deliver.plan_weight,0)
+									from t_pinche_order_deliver
+									where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+									       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+
+									delete from t_pinche_order_deliver using t_total_order_deliver
+									where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+									       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+									
+									insert into t_total_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+									select dept_type,mtrl_no,plan_integer,plan_weight
+									from t_pinche_order_deliver ;
+
+									select count(1)
+									into ll_count1 
+									from t_total_order_deliver ;
+
+									select count(1) into ll_count2
+									from t_deliver_capacity,t_total_order_deliver
+									where   t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+										t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+										t_deliver_capacity.resi_new_qty >= t_total_order_deliver.plan_integer and
+										t_deliver_capacity.plan_date  = ld_plan ; 
+									if ll_count1 = ll_count2 then
+										insert into t_pinche_order (order_no,item_no,xuhao)
+										select order_no,order_itemno,2
+										from t_order
+										where bill_type = '销售' and 
+										       order_no = ll_pinche_order and
+										       assign_status  ='初始' ;	
+									else
+										 --恢复初始可供
+										update t_total_order_deliver
+										set plan_integer =coalesce(t_total_order_deliver.plan_integer,0) - coalesce( t_pinche_order_deliver.plan_integer,0),
+										    plan_weight =coalesce(t_total_order_deliver.plan_weight,0) - coalesce( t_pinche_order_deliver.plan_weight,0)
+										from  t_pinche_order_deliver
+										where  t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+										       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+
+									end if;
+								else
+									--检测可排量
+									truncate table t_pinche_order_deliver;
+									insert into t_pinche_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+									select dept_type,mtrl_no,sum(plan_integer),sum(plan_weight)
+									from t_order
+									where bill_type = '销售' and  order_no = ll_pinche_order and
+										assign_status  ='初始'
+									group by dept_type,mtrl_no;
+
+									update t_total_order_deliver
+									set plan_integer =coalesce(t_total_order_deliver.plan_integer,0) + coalesce( t_pinche_order_deliver.plan_integer,0),
+									    plan_weight =coalesce(t_total_order_deliver.plan_weight,0) + coalesce( t_pinche_order_deliver.plan_weight,0)
+									from t_pinche_order_deliver
+									where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+									       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+
+									delete from t_pinche_order_deliver using t_total_order_deliver
+									where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+									       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+									
+									insert into t_total_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+									select dept_type,mtrl_no,plan_integer,plan_weight
+									from t_pinche_order_deliver ;
+
+									update t_total_order_deliver
+									set can_deliver = 1
+									from  t_deliver_capacity
+									where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+									      t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+									      t_deliver_capacity.resi_new_qty > t_total_order_deliver.plan_integer and
+									      t_deliver_capacity.plan_date  = ld_plan ; 
+
+									truncate table t_pinche_order_item ;
+									insert into t_pinche_order_item(order_no,item_no)
+									select distinct order_no,order_itemno
+									from t_order,t_total_order_deliver
+									where t_order.order_no = ll_pinche_order and
+									      t_order.assign_status  ='初始' and
+									      t_order.dept_type = t_total_order_deliver.dept_type and
+									      t_order.mtrl_no = t_total_order_deliver.mtrl_no  and
+									      t_total_order_deliver.can_deliver = 1;
+									--可供不足产品恢复可供					
+									update t_total_order_deliver
+									set plan_integer =coalesce(t_total_order_deliver.plan_integer,0) - coalesce( t_pinche_order_deliver.plan_integer,0),
+									    plan_weight =coalesce(t_total_order_deliver.plan_weight,0) - coalesce( t_pinche_order_deliver.plan_weight,0)
+									from t_pinche_order_deliver
+									where  t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+									       t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no  and
+									       t_total_order_deliver.can_deliver = 0;
+
+									select count(1) into ll_count1 from t_pinche_order_item ;
+
+									if ll_count1 >0 then
+										insert into t_pinche_order (order_no,item_no,xuhao)
+										select order_no,item_no,2
+										from t_pinche_order_item ; 
+									end if;
+
+								end if;
+								insert into t_oper_pinche_order(order_no)
+								values (ll_pinche_order);
+							end loop;
+							select coalesce(sum(plan_weight),0)
+							into ll_total_weight
+							from t_total_order_deliver ;
+							if  ll_total_weight >=ll_zhengche_weight3 then
+								--每个产品可排量足够 则排单扣除可供量，则加已经排量
+								update t_deliver_capacity
+								set used_qty = used_qty + t_total_order_deliver.plan_integer,
+								    resi_new_qty = resi_new_qty - t_total_order_deliver.plan_integer
+								from t_total_order_deliver
+								where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+									t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+									t_deliver_capacity.plan_date =ld_plan ; 
+
+								update t_deliver_capacity
+								set st_new_qty = st_new_qty - t_total_order_deliver.plan_integer,
+									resi_new_qty = resi_new_qty - t_total_order_deliver.plan_integer
+								from t_total_order_deliver
+								where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+									t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+									t_deliver_capacity.plan_date > ld_plan ;
+
+								select che_order into ll_che
+								from t_date_che
+								where plan_date = ld_plan ; 
+
+								-- 修改订单状态
+								update t_order
+								set market_deliver_day = ld_plan,
+								    assign_status = '预排',
+								    che_order = ll_che +1
+								from t_pinche_order
+								where t_order.order_no =t_pinche_order.order_no and
+								      t_order.order_itemno =t_pinche_order.item_no and
+								       assign_status = '初始';
+								
+								update t_date_che
+								set che_order =che_order +1
+								where plan_date = ld_plan ; 
+								exit outloop1;
+							else
+								select sum(plan_weight) into ll_total_weight
+								from t_order,t_pinche_order
+								where   bill_type = '销售' and
+									t_order.order_no = t_pinche_order.order_no and
+									t_order.order_itemno = t_pinche_order.item_no and
+									t_pinche_order.xuhao = 0 and
+									assign_status  ='初始' ;
+								select sum(plan_weight) into ll_total_weight1
+								from t_order,t_pinche_order
+								where  bill_type = '销售' and 
+									t_order.order_no = t_pinche_order.order_no and
+									t_order.order_itemno = t_pinche_order.item_no and
+									t_pinche_order.xuhao = 1 and
+									assign_status  ='初始' ;
+								select sum(plan_weight) into ll_total_weight2
+								from t_order,t_pinche_order
+								where bill_type = '销售' and
+									t_order.order_no = t_pinche_order.order_no and
+									t_order.order_itemno = t_pinche_order.item_no and
+									t_pinche_order.xuhao = 2 and
+									assign_status  ='初始' ;
+								if ll_total_weight + ll_total_weight1 >= ll_zhengche_weight then
+									truncate table t_pinche_order_deliver;
+									insert into t_pinche_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+									select dept_type,mtrl_no,sum(plan_integer),sum(plan_weight)
+									from t_order,t_pinche_order
+									where bill_type = '销售' and 
+									      t_order.order_no = t_pinche_order.order_no and
+									      t_order.order_itemno = t_pinche_order.item_no and
+									      t_pinche_order.xuhao = 2 and
+										assign_status  ='初始'
+									group by dept_type,mtrl_no;
+
+									update t_total_order_deliver
+									set plan_integer = t_total_order_deliver.plan_integer - t_pinche_order_deliver.plan_integer,
+									    plan_weight = t_total_order_deliver.plan_weight - t_pinche_order_deliver.plan_weight
+									from t_pinche_order_deliver
+									where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+									      t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+										
+
+									update t_deliver_capacity
+									set used_qty = used_qty + t_total_order_deliver.plan_integer,
+									    resi_new_qty = resi_new_qty - t_total_order_deliver.plan_integer
+									from t_total_order_deliver
+									where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+										t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+										t_deliver_capacity.plan_date =ld_plan ; 
+
+									update t_deliver_capacity
+									set st_new_qty = st_new_qty - t_total_order_deliver.plan_integer,
+									    resi_new_qty = resi_new_qty - t_total_order_deliver.plan_integer
+									from t_total_order_deliver
+									where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+										t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+										t_deliver_capacity.plan_date > ld_plan ;
+
+									select che_order into ll_che
+									from t_date_che
+									where plan_date = ld_plan ; 
+
+									-- 修改订单状态
+									update t_order
+									set market_deliver_day = ld_plan,
+									    assign_status = '预排',
+									    che_order = ll_che +1
+									from t_pinche_order
+									where t_order.order_no =t_pinche_order.order_no and
+									       t_order.order_itemno =t_pinche_order.item_no and
+									       assign_status = '初始' and
+									       t_pinche_order.xuhao in(0,1) ;
+									
+									update t_date_che
+									set che_order =che_order +1
+									where plan_date = ld_plan ; 
+									exit outloop1;
+								else
+								    if ll_total_weight +ll_total_weight2 >=ll_zhengche_weight then
+									truncate table t_pinche_order_deliver;
+									insert into t_pinche_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+									select dept_type,mtrl_no,sum(plan_integer),sum(plan_weight)
+									from t_order,t_pinche_order
+									where bill_type = '销售' and 
+									      t_order.order_no = t_pinche_order.order_no and
+									      t_order.order_itemno = t_pinche_order.item_no and
+									      t_pinche_order.xuhao = 1 and
+										assign_status  ='初始'
+									group by dept_type,mtrl_no;
+
+									update t_total_order_deliver
+									set plan_integer = t_total_order_deliver.plan_integer - t_pinche_order_deliver.plan_integer,
+									    plan_weight = t_total_order_deliver.plan_weight - t_pinche_order_deliver.plan_weight
+									from t_pinche_order_deliver
+									where t_total_order_deliver.dept_type = t_pinche_order_deliver.dept_type and
+									      t_total_order_deliver.mtrl_no = t_pinche_order_deliver.mtrl_no ;
+										
+
+									update t_deliver_capacity
+									set used_qty = used_qty + t_total_order_deliver.plan_integer,
+									    resi_new_qty = resi_new_qty - t_total_order_deliver.plan_integer
+									from t_total_order_deliver
+									where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+										t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+										t_deliver_capacity.plan_date =ld_plan ; 
+
+									update t_deliver_capacity
+									set st_new_qty = st_new_qty - t_total_order_deliver.plan_integer,
+									    resi_new_qty = resi_new_qty - t_total_order_deliver.plan_integer
+									from t_total_order_deliver
+									where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+										t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+										t_deliver_capacity.plan_date > ld_plan ;
+
+									select che_order into ll_che
+									from t_date_che
+									where plan_date = ld_plan ; 
+
+				
+
+									update t_order
+									set market_deliver_day = ld_plan,
+									    assign_status = '预排',
+									    che_order = ll_che +1
+									 from t_pinche_order
+									 where 
+										t_order.order_no = t_pinche_order.order_no and
+										t_order.order_itemno = t_pinche_order.item_no and
+										t_pinche_order.xuhao in (0,2) and
+										assign_status = '初始';
+									
+									update t_date_che
+									set che_order =che_order +1
+									where plan_date = ld_plan ;
+									exit outloop1;
+								    end if;
+								end if;
+							end if ;
+
+						end loop;--第二个地址
+						--判断是否十吨
+						if ll_count = 1 then
+						     select coalesce(sum(plan_weight),0)
+						      into ll_total_weight
+						     from t_total_order_deliver ;
+						    if ll_total_weight  >=ll_zhengche_weight then
+
+							update t_deliver_capacity
+							set used_qty = used_qty + t_total_order_deliver.plan_integer,
+							    resi_new_qty = resi_new_qty - t_total_order_deliver.plan_integer
+							from t_total_order_deliver
+							where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+								t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+								t_deliver_capacity.plan_date =ld_plan ; 
+
+							update t_deliver_capacity
+							set st_new_qty = st_new_qty - t_total_order_deliver.plan_integer,
+							    resi_new_qty = resi_new_qty - t_total_order_deliver.plan_integer
+							from t_total_order_deliver
+							where t_deliver_capacity.dept_type = t_total_order_deliver.dept_type and
+								t_deliver_capacity.mtrl_no = t_total_order_deliver.mtrl_no and
+								t_deliver_capacity.plan_date > ld_plan ;
+
+							select che_order into ll_che
+							from t_date_che
+							where plan_date = ld_plan ; 
+
+							-- 修改订单状态
+							update t_order
+							set market_deliver_day = ld_plan,
+							    assign_status = '预排',
+							    che_order = ll_che +1
+							 where order_no in (select order_no from t_pinche_order ) and
+							       assign_status = '初始';
+							
+							update t_date_che
+							set che_order =che_order +1
+							where plan_date = ld_plan ;
+							exit;
+						    end if;
+						end if;
+					  end loop;--第一个地址
+
+				end if;--同一地址
+
+			end if;
+
+			insert into t_oper_order(bill_type,order_no)
+			values('销售',ll_order_no);    
+			
+		end loop ;	
+		
+		if exists (select 1 	from t_order	where bill_type = '销售' and 
+							assign_status  ='初始' and
+							about_deliver_date < ld_plan + interval '1 day') then
+
+			for rs in 	select	t_order.che_order,count(distinct series_no),
+						sum(t_order.plan_weight) as plan_weight
+			from t_order
+			where bill_type = '销售' and 
+			     che_order >0 and
+			     coalesce(pifa_customer,'') = ''
+			group by t_order.che_order
+			having count(distinct series_no) =1
+			order by t_order.che_order
+			loop -- 对应2211行
+				select distinct  series_no,street_no into ll_series,ls_street_no
+				 from t_order
+				 where  t_order.che_order = rs.che_order ;
+
+				truncate table t_pin_town_deal ;
+				insert into t_pin_town_deal(pinche_xuhao,deli_townno,pinche_town)
+				select pinche_xuhao,deli_townno,pinche_town
+				from t_pin_town 
+				where deli_townno = ls_street_no ;
+
+				  truncate table t_pinche_series_data;
+				  truncate table t_pinche_series_temp;
+				  insert into t_pinche_series_data(pinche_xuhao,series_no,about_deliver_date,order_no)
+				  select distinct  t_pin_town_deal.pinche_xuhao,
+					   t_order.series_no,				
+					   t_order.about_deliver_date ,t_order.order_no 
+				 from t_order ,t_pin_town_deal
+				where  t_order.street_no = t_pin_town_deal.pinche_town and
+				       t_order.assign_status = '初始' and
+				       bill_type = '销售' and
+				       t_order.about_deliver_date < ld_plan + interval '1 day'
+				 order by t_pin_town_deal.pinche_xuhao, t_order.about_deliver_date ,t_order.order_no ;
+
+				  insert into t_pinche_series_temp(series_no,xuhao)
+				  select series_no,min(xuhao) 
+				  from t_pinche_series_data
+				  group by series_no ;
+				  truncate table t_pinche_series;
+				  insert into t_pinche_series(series_no)
+				  select series_no
+				  from t_pinche_series_temp
+				  order by xuhao;
+				  insert into t_pinche_series(series_no,xuhao)
+				  values(ll_series,0);
+				for rs2 in select * from t_pinche_series order by xuhao
+				loop
+					truncate table t_oper_pinche_order ; 
+					loop
+						select distinct about_deliver_date ,order_no,pifa_customer
+						into ld_about_deliver_date,ll_pinche_order,ls_pifa_customer
+						from t_order
+						where bill_type = '销售' and assign_status = '初始' and 
+							series_no =rs2.series_no and
+							order_no not in (select order_no from t_oper_pinche_order ) and
+							about_deliver_date < ld_plan + interval '1 day'
+						order by about_deliver_date,order_no,pifa_customer;
+						if not found then
+							exit;
+						end if ; 
+						if ls_pifa_customer > '' then
+							--检测可排量
+							truncate table t_order_deliver;
+							insert into t_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+							select dept_type,mtrl_no,sum(plan_integer),sum(plan_weight)
+							from t_order
+							where bill_type = '销售' and  order_no = ll_pinche_order and
+								assign_status  ='初始'
+							group by dept_type,mtrl_no;
+
+					
+
+							select count(1)
+							into ll_count1 
+							from t_order_deliver ;
+
+
+							select count(1) into ll_count2
+							from t_deliver_capacity,t_order_deliver
+							where   t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+								t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+								t_deliver_capacity.resi_new_qty >= t_order_deliver.plan_integer and
+								t_deliver_capacity.plan_date  = ld_plan ; 
+
+							if ll_count1 = ll_count2 then
+
+								update t_deliver_capacity
+								set used_qty = used_qty + t_order_deliver.plan_integer,
+								    resi_new_qty = resi_new_qty - t_order_deliver.plan_integer
+								from t_order_deliver
+								where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+									t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+									t_deliver_capacity.plan_date =ld_plan ; 
+
+								update t_deliver_capacity
+								set st_new_qty = st_new_qty - t_order_deliver.plan_integer,
+								    resi_new_qty = resi_new_qty - t_order_deliver.plan_integer
+								from t_order_deliver
+								where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+									t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+									t_deliver_capacity.plan_date > ld_plan ;
+								update t_order
+								set market_deliver_day = ld_plan,
+								    assign_status = '预排',
+								    che_order = rs.che_order
+								 where order_no = ll_pinche_order and
+								       assign_status = '初始' and
+								       bill_type = '销售'  ;
+
+							end if;
+						else
+		-- 					--检测可排量
+							truncate table t_order_deliver;
+							insert into t_order_deliver(dept_type,mtrl_no,plan_integer,plan_weight)
+							select dept_type,mtrl_no,sum(plan_integer),sum(plan_weight)
+							from t_order
+							where bill_type = '销售' and  order_no = ll_pinche_order and
+								assign_status  ='初始'
+							group by dept_type,mtrl_no;
+
+
+			
+
+							update t_order_deliver
+							set can_deliver = 1
+							from  t_deliver_capacity
+							where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+							      t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+							      t_deliver_capacity.resi_new_qty > t_order_deliver.plan_integer and
+							      t_deliver_capacity.plan_date  = ld_plan ; 
+
+							
+							truncate table t_pinche_order_item ;
+							insert into t_pinche_order_item(order_no,item_no)
+							select distinct order_no,order_itemno
+							from t_order,t_total_order_deliver
+							where t_order.order_no = ll_pinche_order and
+							      t_order.assign_status  ='初始' and
+							      t_order.dept_type = t_total_order_deliver.dept_type and
+							      t_order.mtrl_no = t_total_order_deliver.mtrl_no  and
+							      t_total_order_deliver.can_deliver = 1;
+
+							select count(1) into ll_count1 from t_pinche_order_item ;
+
+
+							if ll_count1 >0 then
+
+
+								update t_deliver_capacity
+								set used_qty = used_qty + t_order_deliver.plan_integer,
+								    resi_new_qty = resi_new_qty - t_order_deliver.plan_integer
+								from t_order_deliver
+								where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+									t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+									t_deliver_capacity.plan_date =ld_plan  and
+									can_deliver =1 ;
+
+								update t_deliver_capacity
+								set st_new_qty = st_new_qty - t_order_deliver.plan_integer,
+								    resi_new_qty = resi_new_qty - t_order_deliver.plan_integer
+								from t_order_deliver
+								where t_deliver_capacity.dept_type = t_order_deliver.dept_type and
+									t_deliver_capacity.mtrl_no = t_order_deliver.mtrl_no and
+									t_deliver_capacity.plan_date > ld_plan  and
+									can_deliver =1 ;
+
+								update t_order
+								set market_deliver_day = ld_plan,
+								    assign_status = '预排',
+								    che_order = rs.che_order
+								 from t_pinche_order_item
+								 where t_order.order_no = t_pinche_order_item.order_no and
+								       t_order.order_itemno = t_pinche_order_item.item_no and
+								       assign_status = '初始' and
+								       bill_type = '销售'  ;
+
+							end if;
+						end if;
+						insert into t_oper_pinche_order(order_no)
+						values (ll_pinche_order);
+					    
+					end loop;
+				end  loop;
+			end loop;
+		end if;
+
+	end if;--是否散单拼车
+ 	ld_plan  = ld_plan + interval '1 day' ;
+ 
+  end loop;
+
+//翻译到此，开始修改数据库
+update xs_yw_serialnumber_data
+set maxnumber= t_date_che.che_order 
+from t_date_che
+where xs_yw_serialnumber_data.serialname =as_loc ||to_char( t_date_che.plan_date,'yyyymmdd');
+
+
+insert into  xs_yw_serialnumber_data(serialname,maxnumber)
+select as_loc ||to_char( t_date_che.plan_date,'yyyymmdd'),che_order
+from t_date_che
+where not exists (select 1 from xs_yw_serialnumber_data
+              where as_loc ||to_char( t_date_che.plan_date,'yyyymmdd')  = serialname) ; 
+
+
+raise notice '结束 %' ,timeofday();
+update xs_yw_dept_deliver_available
+set st_new_qty = t_deliver_capacity.st_new_qty,
+    used_qty =t_deliver_capacity.used_qty,
+    resi_new_qty =  t_deliver_capacity.resi_new_qty
+from t_deliver_capacity
+where xs_yw_dept_deliver_available.dept_no = t_deliver_capacity.dept_no and 
+      xs_yw_dept_deliver_available.mtrl_no = t_deliver_capacity.mtrl_no and 
+      xs_yw_dept_deliver_available.plan_date = t_deliver_capacity.plan_date and
+     coalesce( t_deliver_capacity.resi_new_qty,0) <> coalesce(t_deliver_capacity.old_resi_new_qty,0) ;
+      
+
+update xs_yw_sale_order_info
+set assign_status = t_order.assign_status,
+    market_deliver_day = t_order.market_deliver_day,
+    operation_man = as_user,
+    operation_time = current_timestamp(0),
+    chehao = che_order
+ from t_order
+ where xs_yw_sale_order_info.order_no = t_order.order_no and
+       xs_yw_sale_order_info.order_itemno = t_order.order_itemno and
+        xs_yw_sale_order_info.plan_status  = '调度' and
+        xs_yw_sale_order_info.assign_status = '初始' and
+        t_order.assign_status = '预排' ;
+
+update xs_yw_yk_order_info
+set assign_status = t_order.assign_status,
+    market_deliver_day = t_order.market_deliver_day,
+    operation_man = as_user,
+    operation_time = current_timestamp(0),
+    chehao = che_order
+ from t_order
+ where xs_yw_yk_order_info.order_no = t_order.order_no and
+       xs_yw_yk_order_info.order_itemno = t_order.order_itemno and
+        xs_yw_yk_order_info.plan_status  = '调度' and
+        xs_yw_yk_order_info.assign_status = '初始' and
+        t_order.assign_status = '预排' ;
+
+
+INSERT INTO xs_yw_auto_deliver_order(
+             bill_type, order_no, order_itemno, customer_no, mtrl_no, 
+            unit_no, plan_integer, about_deliver_date, request_deliver_date, 
+            plan_time, trans_way, series_no, ware_no, plan_weight, dept_type, 
+            street_no, market_deliver_day, mtrl_count, zhengche_mark, che_order, 
+            plan_status, assign_status, series_order, street_order,oper_man,oper_time,loc_no)
+select 	    bill_type, order_no, order_itemno, customer_no, mtrl_no, 
+            unit_no, plan_integer, about_deliver_date, request_deliver_date, 
+            plan_time, trans_way, series_no, ware_no, plan_weight, dept_type, 
+            street_no, market_deliver_day, mtrl_count, zhengche_mark, che_order, 
+            plan_status, assign_status, series_order, street_order,as_user,current_timestamp(0),
+            as_loc
+from t_order
+where   t_order.plan_status  = '调度' and
+        t_order.assign_status = '预排' ; 
+
+
+return 1;
+end;
+$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100

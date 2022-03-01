@@ -1,0 +1,129 @@
+MdmAdministrativeAreaMapper：
+
+	List<MdmAdministrativeArea> selectCityName();
+
+    List<MdmAdministrativeArea> selectProvinceName();
+
+    List<MdmAdministrativeArea> selectCityNameByProvince(String provinceName);
+
+    List<MdmAdministrativeArea> selectDistrictNameByCity(String cityName);
+
+
+	<select id="selectCityName" resultMap="BaseResultMap">
+        select distinct city_code,city_name
+        from mdm_administrative_area
+        where is_valid='有效'
+    </select>
+    <select id="selectProvinceName" resultMap="BaseResultMap">
+        select distinct province_name
+        from mdm_administrative_area
+        where is_valid='有效'
+    </select>
+    <select id="selectCityNameByProvince"  resultMap="BaseResultMap">
+        select distinct city_name
+        from mdm_administrative_area
+        where is_valid='有效'
+        and province_name = #{provinceName}
+    </select>
+    <select id="selectDistrictNameByCity"  resultMap="BaseResultMap">
+        select distinct district_name
+        from mdm_administrative_area
+        where is_valid='有效'
+        and city_name = #{cityName}
+    </select>
+	
+
+MdmAdministrativeStreetMapper：
+	
+	List<MdmAdministrativeStreet> listStreetByProvinceCityDistrict(MdmAdministrativeArea area);
+	
+	<select id="listStreetByProvinceCityDistrict"
+            resultMap="BaseResultMap">
+       select distinct street_name
+        from mdm_administrative_street
+        where is_valid = '有效'
+        and province_name =#{provinceName}
+        and city_name = #{cityName}
+        and district_name = #{districtName}
+    </select>
+
+	
+MdmCompanySupplierApplyMapper：
+
+	<insert id="insertSelective" parameterType="com.whhim.erp.mdm.mapper.mdm.dto.MdmCompanySupplierApply" useGeneratedKeys="true" keyProperty="id">
+	
+
+MdmCompanySupplierMapper：
+	
+	List<MdmCompanySupplier> listCompanyByUserId(String userId);
+		
+	<select id="listCompanyByUserId" resultType="com.whhim.erp.mdm.mapper.mdm.dto.MdmCompanySupplier">
+        select distinct a.company_code,b.company_name
+        from mdm_user_company a
+        join mdm_company_supplier b
+        on a.is_valid = '有效' and b.is_valid = '有效' and a.company_code = b.company_code
+        where user_id = #{userId}
+    </select>
+	
+	
+	
+MdmSupplierPurchaseOrgMapper:
+
+	int insertBatch(List<MdmSupplierPurchaseOrg> list);
+	
+	<insert id="insertSelective" parameterType="com.whhim.erp.mdm.mapper.mdm.dto.MdmSupplierPurchaseOrg" useGeneratedKeys="true" keyProperty="id">
+	
+	<insert id="insertBatch">
+		insert into mdm_supplier_purchase_org (supplier_code, purchase_org_code,
+		  is_valid, is_freeze, is_invoice_verification,
+		  currency_code, mercantile_terms_code, price_group_code,
+		  operate_user, operate_time)
+		values
+		<foreach collection="list" item="purchaseOrg" separator=",">
+		 (#{purchaseOrg.supplierCode,jdbcType=VARCHAR}, #{purchaseOrg.purchaseOrgCode,jdbcType=VARCHAR},
+		  #{purchaseOrg.isValid,jdbcType=VARCHAR}, #{purchaseOrg.isFreeze,jdbcType=VARCHAR}, #{purchaseOrg.isInvoiceVerification,jdbcType=VARCHAR},
+		  #{purchaseOrg.currencyCode,jdbcType=VARCHAR}, #{purchaseOrg.mercantileTermsCode,jdbcType=VARCHAR}, #{purchaseOrg.priceGroupCode,jdbcType=VARCHAR},
+		  #{purchaseOrg.operateUser,jdbcType=VARCHAR}, #{purchaseOrg.operateTime,jdbcType=TIMESTAMP})
+		</foreach>
+	</insert>
+	
+	
+MdmSupplierCompanyMapper:	
+
+	int insertBatch(List<MdmSupplierCompany> list);
+	
+	<insert id="insertSelective" parameterType="com.whhim.erp.mdm.mapper.mdm.dto.MdmSupplierCompany" useGeneratedKeys="true" keyProperty="id">
+	
+	 <insert id="insertBatch">
+        insert into mdm_supplier_company (supplier_code, company_code,
+          is_valid, is_freeze, reconciliation_account_code,
+          payment_types_code, payment_terms_code, cash_group_code,
+          gruop_account, operate_user, operate_time
+          )
+        values
+        <foreach collection="list" item="supplierCompany" separator=",">
+            (#{supplierCompany.supplierCode,jdbcType=VARCHAR}, #{supplierCompany.companyCode,jdbcType=VARCHAR},
+            #{supplierCompany.isValid,jdbcType=VARCHAR}, #{supplierCompany.isFreeze,jdbcType=VARCHAR}, #{supplierCompany.reconciliationAccountCode,jdbcType=VARCHAR},
+            #{supplierCompany.paymentTypesCode,jdbcType=VARCHAR}, #{supplierCompany.paymentTermsCode,jdbcType=VARCHAR}, #{supplierCompany.cashGroupCode,jdbcType=VARCHAR},
+            #{supplierCompany.gruopAccount,jdbcType=VARCHAR}, #{supplierCompany.operateUser,jdbcType=VARCHAR}, #{supplierCompany.operateTime,jdbcType=TIMESTAMP}
+            )
+        </foreach>
+    </insert>
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	

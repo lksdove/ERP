@@ -1,0 +1,296 @@
+/**
+     * 省市区保存自动调用
+     */
+    public void mdmAdministrativeAreaSave(){
+        WhhTransactionTemplate template = new WhhTransactionTemplate(true);
+        template.execute(new WhhTransactionCallback() {
+            @Override
+            public Object doInTransaction() {
+                DataStore ds = DataStoreManager.getDataStore("ds_mdm_administrative_area_lks");
+                List<HashMapVO> addList = ds.getAddData();
+                for (HashMapVO add_vo : addList) {
+                    add_vo.put("operate_user", getLoginUser().getUserId());
+                    add_vo.put("operate_time", new Date());
+                    ds.updateRow(add_vo);
+                }
+                List<HashMapVO> updateList = ds.getUpdateData();
+                for (HashMapVO update_vo : updateList) {
+                    update_vo.put("operate_user", getLoginUser().getUserId());
+                    update_vo.put("operate_time", new Date());
+                    ds.updateRow(update_vo);
+                }
+                DataStoreManager.save();
+                return null;
+            }
+        });
+    }
+
+    /**
+     * 省市区街道保存自动调用
+     */
+    public void mdmAdministrativeStreetSave(){
+        WhhTransactionTemplate template = new WhhTransactionTemplate(true);
+        template.execute(new WhhTransactionCallback() {
+            @Override
+            public Object doInTransaction() {
+                DataStore ds = DataStoreManager.getDataStore("ds_mdm_administrative_street_lks");
+                List<HashMapVO> addList = ds.getAddData();
+                for (HashMapVO add_vo : addList) {
+                    add_vo.put("operate_user", getLoginUser().getUserId());
+                    add_vo.put("operate_time", new Date());
+                    ds.updateRow(add_vo);
+                }
+                List<HashMapVO> updateList = ds.getUpdateData();
+                for (HashMapVO update_vo : updateList) {
+                    update_vo.put("operate_user", getLoginUser().getUserId());
+                    update_vo.put("operate_time", new Date());
+                    ds.updateRow(update_vo);
+                }
+                DataStoreManager.save();
+                return null;
+            }
+        });
+    }
+
+    /**
+     * 单位保存自动调用
+     */
+    public void mdmUnitSave(){
+        WhhTransactionTemplate template = new WhhTransactionTemplate(true);
+        template.execute(new WhhTransactionCallback() {
+            @Override
+            public Object doInTransaction() {
+                DataStore ds = DataStoreManager.getDataStore("ds_mdm_unit_lks");
+                List<HashMapVO> addList = ds.getAddData();
+                for (HashMapVO add_vo : addList) {
+                    add_vo.put("operate_user", getLoginUser().getUserId());
+                    add_vo.put("operate_time", new Date());
+                    ds.updateRow(add_vo);
+                }
+                List<HashMapVO> updateList = ds.getUpdateData();
+                for (HashMapVO update_vo : updateList) {
+                    update_vo.put("operate_user", getLoginUser().getUserId());
+                    update_vo.put("operate_time", new Date());
+                    ds.updateRow(update_vo);
+                }
+                DataStoreManager.save();
+                return null;
+            }
+        });
+    }
+
+    /**
+     * 货币保存自动调用
+     */
+    public void mdmCurrencySave(){
+        WhhTransactionTemplate template = new WhhTransactionTemplate(true);
+        template.execute(new WhhTransactionCallback() {
+            @Override
+            public Object doInTransaction() {
+                DataStore ds = DataStoreManager.getDataStore("ds_mdm_currency_lks");
+                List<HashMapVO> addList = ds.getAddData();
+                for (HashMapVO add_vo : addList) {
+                    add_vo.put("operate_user", getLoginUser().getUserId());
+                    add_vo.put("operate_time", new Date());
+                    ds.updateRow(add_vo);
+                }
+                List<HashMapVO> updateList = ds.getUpdateData();
+                for (HashMapVO update_vo : updateList) {
+                    update_vo.put("operate_user", getLoginUser().getUserId());
+                    update_vo.put("operate_time", new Date());
+                    ds.updateRow(update_vo);
+                }
+                DataStoreManager.save();
+                return null;
+            }
+        });
+    }
+
+    /**
+     * 税码保存自动调用
+     */
+    public void mdmTaxSave(){
+        WhhTransactionTemplate template = new WhhTransactionTemplate(true);
+        template.execute(new WhhTransactionCallback() {
+            @Override
+            public Object doInTransaction() {
+                DataStore ds = DataStoreManager.getDataStore("ds_mdm_tax_lks");
+                List<HashMapVO> addList = ds.getAddData();
+                for (HashMapVO add_vo : addList) {
+                    add_vo.put("operate_user", getLoginUser().getUserId());
+                    add_vo.put("operate_time", new Date());
+                    ds.updateRow(add_vo);
+                }
+                List<HashMapVO> updateList = ds.getUpdateData();
+                for (HashMapVO update_vo : updateList) {
+                    update_vo.put("operate_user", getLoginUser().getUserId());
+                    update_vo.put("operate_time", new Date());
+                    ds.updateRow(update_vo);
+                }
+                DataStoreManager.save();
+                return null;
+            }
+        });
+    }
+
+    /**
+     * 货运车站保存自动调用
+     */
+    public void mdmFreightStationSave(){
+        WhhTransactionTemplate template = new WhhTransactionTemplate(true);
+        template.execute(new WhhTransactionCallback() {
+            @Override
+            public Object doInTransaction() {
+                DataStore ds = DataStoreManager.getDataStore("ds_mdm_freight_station_lks");
+                List<HashMapVO> addList = ds.getAddData();
+                for (HashMapVO add_vo : addList) {
+                    add_vo.put("operate_user", getLoginUser().getUserId());
+                    add_vo.put("operate_time", new Date());
+                    ds.updateRow(add_vo);
+                }
+                List<HashMapVO> updateList = ds.getUpdateData();
+                for (HashMapVO update_vo : updateList) {
+                    update_vo.put("operate_user", getLoginUser().getUserId());
+                    update_vo.put("operate_time", new Date());
+                    ds.updateRow(update_vo);
+                }
+                DataStoreManager.save();
+                return null;
+            }
+        });
+    }
+
+    /**
+     * 生产片区保存自动调用
+     */
+    public void mdmAreaSave(){
+        WhhTransactionTemplate template = new WhhTransactionTemplate(true);
+        template.execute(new WhhTransactionCallback() {
+            @Override
+            public Object doInTransaction() {
+                DataStore ds = DataStoreManager.getDataStore("ds_mdm_area_lks");
+                List<HashMapVO> addList = ds.getAddData();
+                for (HashMapVO add_vo : addList) {
+                    add_vo.put("operate_user", getLoginUser().getUserId());
+                    add_vo.put("operate_time", new Date());
+                    ds.updateRow(add_vo);
+                }
+                List<HashMapVO> updateList = ds.getUpdateData();
+                for (HashMapVO update_vo : updateList) {
+                    update_vo.put("operate_user", getLoginUser().getUserId());
+                    update_vo.put("operate_time", new Date());
+                    ds.updateRow(update_vo);
+                }
+                DataStoreManager.save();
+                return null;
+            }
+        });
+    }
+
+    /**
+     * 生产基地保存自动调用
+     */
+    public void mdmBaseSave(){
+        WhhTransactionTemplate template = new WhhTransactionTemplate(true);
+        template.execute(new WhhTransactionCallback() {
+            @Override
+            public Object doInTransaction() {
+                DataStore ds = DataStoreManager.getDataStore("ds_mdm_base_lks");
+                List<HashMapVO> addList = ds.getAddData();
+                for (HashMapVO add_vo : addList) {
+                    add_vo.put("operate_user", getLoginUser().getUserId());
+                    add_vo.put("operate_time", new Date());
+                    ds.updateRow(add_vo);
+                }
+                List<HashMapVO> updateList = ds.getUpdateData();
+                for (HashMapVO update_vo : updateList) {
+                    update_vo.put("operate_user", getLoginUser().getUserId());
+                    update_vo.put("operate_time", new Date());
+                    ds.updateRow(update_vo);
+                }
+                DataStoreManager.save();
+                return null;
+            }
+        });
+    }
+
+    /**
+     * 片区生产基地保存自动调用
+     */
+    public void mdmBaseAreaSave(){
+        WhhTransactionTemplate template = new WhhTransactionTemplate(true);
+        template.execute(new WhhTransactionCallback() {
+            @Override
+            public Object doInTransaction() {
+                DataStore ds = DataStoreManager.getDataStore("ds_mdm_base_area_lks");
+                List<HashMapVO> addList = ds.getAddData();
+                for (HashMapVO add_vo : addList) {
+                    add_vo.put("operate_user", getLoginUser().getUserId());
+                    add_vo.put("operate_time", new Date());
+                    ds.updateRow(add_vo);
+                }
+                List<HashMapVO> updateList = ds.getUpdateData();
+                for (HashMapVO update_vo : updateList) {
+                    update_vo.put("operate_user", getLoginUser().getUserId());
+                    update_vo.put("operate_time", new Date());
+                    ds.updateRow(update_vo);
+                }
+                DataStoreManager.save();
+                return null;
+            }
+        });
+    }
+
+    /**
+     * 片区生产基地保存自动调用
+     */
+    public void mdmCompanySave(){
+        WhhTransactionTemplate template = new WhhTransactionTemplate(true);
+        template.execute(new WhhTransactionCallback() {
+            @Override
+            public Object doInTransaction() {
+                DataStore ds = DataStoreManager.getDataStore("ds_mdm_company_lks");
+                List<HashMapVO> addList = ds.getAddData();
+                for (HashMapVO add_vo : addList) {
+                    add_vo.put("operate_user", getLoginUser().getUserId());
+                    add_vo.put("operate_time", new Date());
+                    ds.updateRow(add_vo);
+                }
+                List<HashMapVO> updateList = ds.getUpdateData();
+                for (HashMapVO update_vo : updateList) {
+                    update_vo.put("operate_user", getLoginUser().getUserId());
+                    update_vo.put("operate_time", new Date());
+                    ds.updateRow(update_vo);
+                }
+                DataStoreManager.save();
+                return null;
+            }
+        });
+    }
+
+    /**
+     * 公司基地保存自动调用
+     */
+    public void mdmCompanyBaseSave(){
+        WhhTransactionTemplate template = new WhhTransactionTemplate(true);
+        template.execute(new WhhTransactionCallback() {
+            @Override
+            public Object doInTransaction() {
+                DataStore ds = DataStoreManager.getDataStore("ds_mdm_company_base_lks");
+                List<HashMapVO> addList = ds.getAddData();
+                for (HashMapVO add_vo : addList) {
+                    add_vo.put("operate_user", getLoginUser().getUserId());
+                    add_vo.put("operate_time", new Date());
+                    ds.updateRow(add_vo);
+                }
+                List<HashMapVO> updateList = ds.getUpdateData();
+                for (HashMapVO update_vo : updateList) {
+                    update_vo.put("operate_user", getLoginUser().getUserId());
+                    update_vo.put("operate_time", new Date());
+                    ds.updateRow(update_vo);
+                }
+                DataStoreManager.save();
+                return null;
+            }
+        });
+    }

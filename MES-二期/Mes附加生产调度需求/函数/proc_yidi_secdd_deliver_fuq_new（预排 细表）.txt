@@ -1,0 +1,804 @@
+CREATE OR REPLACE FUNCTION "public"."proc_yidi_secdd_deliver_fuq_new"("as_dept" varchar)
+  RETURNS SETOF "pg_catalog"."record" AS $BODY$
+--函数参数描述：排货日期、产地名称、实发日期开始时间
+--抬头参数
+declare rec record; as_sql text;rs record;
+declare adt_start_deliver_date timestamp;
+declare ldec_dis numeric(20,2);ls_city varchar(10);ll_count integer;ldt_plan_time timestamp(0);
+declare user_group varchar(16) = '%';                   --用户权限组名称
+declare ls_customer varchar(10);ll_order_no integer;ll_order_itemno integer;
+declare ll_series_no integer;ll_serial integer =0;ldt_request_date date;ldec_dunwei numeric(20,2);
+declare ls_street varchar(50);ldec_best numeric(20,2);
+begin
+
+--t2427*
+--本月1号
+adt_start_deliver_date = date_trunc('month',CURRENT_DATE);
+
+--'产品产能分类'
+create temp table t2427_cpcn_class
+(
+  materialid varchar(10) null,
+  typename varchar(32) null
+) ON COMMIT DROP;
+
+insert into t2427_cpcn_class
+  select materialid,typename
+  from jc_materialascription
+  where classname = '产品产能分类' and rank = 2;
+
+--R3 第三层次产品类
+create temp table t2427_r3_class
+(
+  materialid varchar(10) null,
+  typecode varchar(18) null
+) ON COMMIT DROP;
+
+insert into t2427_r3_class
+  select materialid,coalesce(typecode,'')
+  from jc_materialascription
+  where jc_materialascription.classname = '产品层次分类' and
+         jc_materialascription.rank = 3;
+
+
+
+create local TEMPORARY table t2427detail
+(
+  bill_type varchar(20) null ,
+  order_no integer null,
+  order_itemno integer null,
+  customer_no varchar(10) null ,
+  customer_name varchar(200) null ,
+  mtrl_no varchar(10) null ,
+  materialname varchar(100) null ,
+  plan_integer numeric(20,8) default 0,
+  about_deliver_date date null,
+  market_deliver_day date null,
+  ware_no varchar(10) null ,
+  entityname varchar(200) null ,
+  plan_time timestamp null,
+  dispatch_time timestamp null,
+  unitweight numeric(20,6) null,
+  plan_weight numeric(20,6) null,
+  trans_way varchar(10) null ,
+  series_no integer null,
+  deliver_type varchar(20) null ,
+  deliver_note varchar(255) null ,
+  goto_addr varchar(255) null ,
+  district_name varchar(255) null ,
+  typename varchar(255) null ,
+  assign_status varchar(10) null ,
+  dept_type varchar(12) null ,
+  assign_integer numeric(20,8) default 0,
+  dept_date date null,
+  unit_no varchar(12) null ,
+  sap_mark varchar(1) null ,
+  firmed varchar(10) null ,
+  new_old varchar(10) null ,
+  pin_no varchar(255) null ,
+  pin_str1 varchar(200) default '',--拼字符串1( customer_no || series_no || mtrl_class )
+  plan_status varchar(10) null,
+  shifa_che integer default 0,     --已实发车数
+  weifa_che integer default 0,     --未发车数轮次
+  item_che integer default 0,      --行项目发货轮次
+  deliver_che integer default 0,   --订单总的发货轮次
+  the_about_date date null,        --订单排货日期
+  the_plan_time timestamp null,    --订单报站时间
+the_request_deliver_date date null, 
+  the_off numeric(20,2) default 0, --库存卸库周期
+  zhu_cusno varchar(10) null,      --主客户代码
+  class_no varchar(18) default '', --R3第三层次分类代码
+  stock_off numeric(20,2) default 0,    --库存卸库周期
+  lei_num integer default 0,       --产品产能分类数
+  dan_num integer default 0,       --单品数
+  mtrl_class varchar(16) default '',--产品产能分类名称
+  pin_str14a varchar(200) default '',     --拼字符串
+  city varchar(30) ,
+  street varchar(50),
+  pf_customer varchar(50),
+  pin_order varchar(50),
+  pin_number integer,
+  distance  numeric(20,2),
+  request_deliver_date date,
+  need_pin integer,
+  best_dunwei numeric(20,2),
+  about_deliver_text varchar(255)
+) ON COMMIT DROP;
+
+
+
+create local TEMPORARY table t2427copy
+(
+  bill_type varchar(20) null ,
+  order_no integer null,
+  order_itemno integer null,
+  customer_no varchar(10) null ,
+  customer_name varchar(200) null ,
+  mtrl_no varchar(10) null ,
+  materialname varchar(100) null ,
+  plan_integer numeric(20,8) default 0,
+  about_deliver_date date null,
+  market_deliver_day date null,
+  ware_no varchar(10) null ,
+  entityname varchar(200) null ,
+  plan_time timestamp null,
+  dispatch_time timestamp null,
+  unitweight numeric(20,6) null,
+  plan_weight numeric(20,6) null,
+  trans_way varchar(10) null ,
+  series_no integer null,
+  deliver_type varchar(20) null ,
+  deliver_note varchar(255) null ,
+  goto_addr varchar(255) null ,
+  district_name varchar(255) null ,
+  typename varchar(255) null ,
+  assign_status varchar(10) null ,
+  dept_type varchar(12) null ,
+  assign_integer numeric(20,8) default 0,
+  dept_date date null,
+  unit_no varchar(12) null ,
+  sap_mark varchar(1) null ,
+  firmed varchar(10) null ,
+  new_old varchar(10) null ,
+  pin_no varchar(255) null ,
+  pin_str1 varchar(200) default '',--拼字符串1( customer_no || series_no || mtrl_class )
+  plan_status varchar(10) null,
+  shifa_che integer default 0,     --已实发车数
+  weifa_che integer default 0,     --未发车数轮次
+  item_che integer default 0,      --行项目发货轮次
+  deliver_che integer default 0,   --订单总的发货轮次
+  the_about_date date null,        --订单排货日期
+  the_plan_time timestamp null,    --订单报站时间
+  the_off numeric(20,2) default 0, --库存卸库周期
+  zhu_cusno varchar(10) null,      --主客户代码
+  class_no varchar(18) default '', --R3第三层次分类代码
+  stock_off numeric(20,2) default 0,    --库存卸库周期
+  lei_num integer default 0,       --产品产能分类数
+  dan_num integer default 0,       --单品数
+  mtrl_class varchar(16) default '',--产品产能分类名称
+  pin_str14a varchar(200) default '',     --拼字符串
+  city varchar(30) ,
+  street varchar(50),
+  pf_customer varchar(50),
+  pin_order varchar(50),
+  pin_number integer ,
+  distance  numeric(20,2),
+  request_deliver_date date,
+  need_pin integer,
+  best_dunwei numeric(20,2)
+) ON COMMIT DROP;
+
+
+create local TEMPORARY table t2427so_weifa
+(
+  bill_type varchar(20) null ,
+  order_no integer null,
+  order_itemno integer null,
+  customer_no varchar(10) null ,
+  customer_name varchar(200) null ,
+  mtrl_no varchar(10) null ,
+  materialname varchar(100) null ,
+  plan_integer numeric(20,8) default 0,
+  about_deliver_date date null,
+  about_deliver_text varchar(255) null,
+  market_deliver_day date null,
+  ware_no varchar(10) null ,
+  entityname varchar(200) null ,
+  plan_time timestamp null,
+  dispatch_time timestamp null,
+  unitweight numeric(20,6) null,
+  plan_weight numeric(20,6) null,
+  trans_way varchar(10) null ,
+  series_no integer null,
+  deliver_type varchar(20) null ,
+  deliver_note varchar(255) null ,
+  goto_addr varchar(255) null ,
+  district_name varchar(255) null ,
+  typename varchar(255) null ,
+  assign_status varchar(10) null ,
+  dept_type varchar(12) null ,
+  assign_integer numeric(20,8) default 0,
+  dept_date date null,
+  unit_no varchar(12) null ,
+  sap_mark varchar(1) null ,
+  firmed varchar(10) null ,
+  new_old varchar(10) null ,
+  pin_no varchar(255) null ,
+  pin_str1 varchar(200) default '',--拼字符串1( customer_no || series_no || mtrl_class )
+  plan_status varchar(10) null,
+  shifa_che integer default 0,     --已实发车数
+  weifa_che integer default 0,     --未发车数轮次
+  item_che integer default 0,      --行项目发货轮次
+  deliver_che integer default 0,   --订单总的发货轮次
+  zhu_cusno varchar(10) null,      --主客户代码
+  class_no varchar(18) default '', --R3第三层次分类代码
+  stock_off numeric(20,2) default 0,    --库存卸库周期
+  lei_num integer default 0,       --产品产能分类数
+  dan_num integer default 0,       --单品数
+  mtrl_class varchar(16) default '',--产品产能分类名称
+  pin_str14a varchar(200) default '',     --拼字符串
+  city varchar(30) ,
+  street varchar(50),
+  pf_customer varchar(50),
+  request_deliver_date date,
+   pin_order varchar(50)
+) ON COMMIT DROP;
+
+create local TEMPORARY table t12165_order
+(
+	pin_number integer,
+	street_number integer,
+	dunwei numeric(20,2) ,
+	best_dunwei numeric(20,2)
+) ON COMMIT DROP;
+
+
+
+
+
+
+
+insert into t2427so_weifa
+  (  bill_type,  order_no ,  order_itemno ,  customer_no ,  customer_name ,
+     mtrl_no ,  materialname ,  plan_integer ,  about_deliver_date ,  market_deliver_day ,
+     ware_no ,  entityname ,  plan_time ,  dispatch_time , unitweight ,  plan_weight ,
+     trans_way ,  series_no ,  deliver_type ,  deliver_note ,  goto_addr ,
+     district_name ,  typename ,  assign_status ,  dept_type ,  assign_integer ,
+     dept_date ,  unit_no ,  sap_mark ,  firmed ,  new_old ,
+     pin_no , plan_status , zhu_cusno,city,street,pf_customer,request_deliver_date ,pin_order,about_deliver_text)
+    SELECT  '销售',
+         xs_yw_sale_order_info.order_no,   
+         xs_yw_sale_order_info.order_itemno,   
+         xs_yw_sale_order_info.customer_no,   
+         jc_sale_customer.customer_name,   
+         xs_yw_sale_order_info.mtrl_no,   
+         jc_material.materialname,   
+         xs_yw_sale_order_info.plan_integer,
+         xs_yw_sale_order_info.about_deliver_date,
+         xs_yw_sale_order_info.market_deliver_day,
+         xs_yw_sale_order_info.ware_no,
+         jc_department.departmentname,
+         xs_yw_sale_order_info.plan_time,
+         xs_yw_sale_order_info.dispatch_time,
+         jc_materialunitexchange.unitweight,
+         (xs_yw_sale_order_info.plan_integer * jc_materialunitexchange.unitweight/1000) as plan_weight,
+         xs_yw_sale_order_info.trans_way,
+         xs_yw_sale_order_info.series_no, 
+         xs_yw_sale_order_info.deliver_type,
+         xs_yw_sale_order_info.deliver_note,
+         jc_customer_tostation.goto_addr,
+         jc_district.departmentname as district_name,   
+         jc_market.departmentname as typename,
+         xs_yw_sale_order_info.assign_status,
+         xs_yw_dept_2_deliver.dept_type,
+         xs_yw_sale_order_info.plan_integer as assign_integer,
+         xs_yw_sale_order_info.market_deliver_day,
+         xs_yw_sale_order_info.unit_no,
+         xs_yw_sale_order_info.sap_mark,
+         '0' as firmed,
+         'new' as new_old,
+         xs_yw_sale_order_info.pin_no,
+         xs_yw_sale_order_info.plan_status,
+         xs_yw_sale_order_info.customer_no,
+         xs_yw_sale_order_info.city_no,
+         xs_yw_sale_order_info.street_no,
+         xs_yw_sale_order_info.pifa_customer,
+         xs_yw_sale_order_info.request_deliver_date,
+         xs_yw_sale_order_info.chehao,
+	case when (xs_yw_sale_order_info.market = '重点客户'  or xs_yw_sale_order_info.market = '集团内部门' ) then
+	        xs_yw_sale_order_info.about_deliver_date :: varchar else
+           xs_jc_order_xun_date.p_month||'月'||xs_jc_order_xun_date.functionname||xs_jc_order_xun_date.note end  as about_deliver_text
+    FROM xs_yw_sale_order_info,  
+	 jc_sale_customer, 
+	 jc_department jc_district,
+	 jc_rankdiagram,
+	 jc_department jc_market,
+         jc_customer_tostation, 
+	 jc_department ,   
+         jc_material,   
+         xs_yw_dept_2_deliver,  
+	 jc_units,
+         jc_materialunitexchange,
+         xs_jc_order_xun_date
+   WHERE ( xs_yw_sale_order_info.customer_no = jc_sale_customer.customer_no ) and  
+         ( jc_sale_customer.district_no = jc_rankdiagram.departmentid ) and
+         ( jc_rankdiagram.departmentid = jc_district.departmentid ) and		
+         ( jc_rankdiagram.parentid = jc_market.departmentid ) and	
+         ( xs_yw_sale_order_info.customer_no = jc_customer_tostation.customer_no  ) and
+         ( xs_yw_sale_order_info.series_no =  jc_customer_tostation.series_no ) and
+         ( xs_yw_sale_order_info.mtrl_no =jc_material.materialid  ) and   
+         ( xs_yw_sale_order_info.ware_no = jc_department.departmentid ) and  
+         ( xs_yw_sale_order_info.ware_no = xs_yw_dept_2_deliver.departmentid ) and  
+         ( xs_yw_sale_order_info.mtrl_no = jc_materialunitexchange.materialid ) and  
+         ( xs_yw_sale_order_info.unit_no = jc_units.unit_gb ) and
+         ( jc_units.unit_no = jc_materialunitexchange.unit_no ) and
+	xs_yw_sale_order_info.p_year = xs_jc_order_xun_date.p_year and
+	xs_yw_sale_order_info.p_month = xs_jc_order_xun_date.p_month and
+	xs_yw_sale_order_info.p_xun = xs_jc_order_xun_date.functionname and
+	xs_jc_order_xun_date.functionmodule ='报站自然旬' and
+         ( xs_yw_dept_2_deliver.loc_no = as_dept ) and 
+         ( xs_yw_sale_order_info.plan_status in ( '调度','打印出库单') ) and  
+         ( xs_yw_sale_order_info.about_deliver_date >= ( current_date - interval '6 month') ) and
+ --        ( xs_yw_sale_order_info.about_deliver_date < ( adt_date + interval '1 day') ) and
+         ( xs_yw_sale_order_info.order_type = '正常' ) and
+         ( xs_yw_sale_order_info.plan_integer > 0 ) and
+	 ( jc_rankdiagram.ranktype ='销售组织' ) and
+	 jc_customer_tostation.use_dept = 'bm3318' ;
+
+--'产品产能分类'名称
+update t2427so_weifa
+set mtrl_class = coalesce(t2427_cpcn_class.typename,''),
+    pin_str14a = customer_no || series_no::varchar(10) || coalesce(t2427_cpcn_class.typename,'') || order_no::varchar(10)
+from t2427_cpcn_class
+where t2427so_weifa.mtrl_no = t2427_cpcn_class.materialid ;
+
+insert into t2427detail
+  (  bill_type,  order_no ,  order_itemno ,  customer_no ,  customer_name ,
+     mtrl_no ,  materialname ,  plan_integer ,  about_deliver_date ,  market_deliver_day ,
+     ware_no ,  entityname ,  plan_time , dispatch_time ,  unitweight ,  plan_weight ,
+     trans_way ,  series_no ,  deliver_type ,  deliver_note ,  goto_addr ,
+     district_name ,  typename ,  assign_status ,  dept_type ,  assign_integer ,
+     dept_date ,  unit_no ,  sap_mark ,  firmed ,  new_old ,
+     pin_no , plan_status , zhu_cusno , mtrl_class , pin_str14a,city,street,pf_customer ,
+     request_deliver_date ,pin_order,about_deliver_text)
+  select bill_type,  order_no ,  order_itemno ,  customer_no ,  customer_name ,
+     mtrl_no ,  materialname ,  plan_integer ,  about_deliver_date ,  market_deliver_day ,
+     ware_no ,  entityname ,  plan_time , dispatch_time , unitweight ,  plan_weight ,
+     trans_way ,  series_no ,  deliver_type ,  deliver_note ,  goto_addr ,
+     district_name ,  typename ,  assign_status ,  dept_type ,  assign_integer ,
+     dept_date ,  unit_no ,  sap_mark ,  firmed ,  new_old ,
+     pin_no , plan_status , zhu_cusno , mtrl_class , pin_str14a,
+     city,street,pf_customer ,request_deliver_date,pin_order,about_deliver_text
+  from t2427so_weifa
+  where ( plan_status = '调度' ) and ( assign_status = '预排');
+
+delete from t2427so_weifa
+where mtrl_class = '';
+
+insert into t2427detail
+  (  bill_type,  order_no ,  order_itemno ,  customer_no ,  customer_name ,
+     mtrl_no ,  materialname ,  plan_integer ,  about_deliver_date ,  market_deliver_day ,
+     ware_no ,  entityname ,  plan_time , dispatch_time , unitweight ,  plan_weight ,
+     trans_way ,  series_no ,  deliver_type ,  deliver_note ,  goto_addr ,
+     district_name ,  typename ,  assign_status ,  dept_type ,  assign_integer ,
+     dept_date ,  unit_no ,  sap_mark ,  firmed ,  new_old ,
+     pin_no , plan_status ,pin_order,about_deliver_text)
+  SELECT '移库',
+         xs_yw_yk_order_info.order_no,   
+         xs_yw_yk_order_info.order_itemno,   
+         xs_yw_yk_order_info.in_ware,   
+         xs_yw_yk_order_info.ware_name,   
+         xs_yw_yk_order_info.mtrl_no,   
+         jc_material.materialname,   
+         xs_yw_yk_order_info.plan_integer,   
+         xs_yw_yk_order_info.about_deliver_date,   
+         xs_yw_yk_order_info.market_deliver_day,   
+         xs_yw_yk_order_info.ware_no,   
+         jc_department.departmentname,   
+         xs_yw_yk_order_info.plan_time,  
+         xs_yw_yk_order_info.dispatch_time, 
+         jc_materialunitexchange.unitweight,   
+         (xs_yw_yk_order_info.plan_integer * jc_materialunitexchange.unitweight/1000) as plan_weight,
+         xs_yw_yk_order_info.trans_way,
+         xs_yw_yk_order_info.series_no, 
+         '',
+         xs_yw_yk_order_info.deliver_note,
+         xs_yw_yk_order_info.org_addr,
+         '',   
+         '',
+         xs_yw_yk_order_info.assign_status,
+         xs_yw_dept_2_deliver.dept_type,
+         xs_yw_yk_order_info.plan_integer as assign_integer,
+         xs_yw_yk_order_info.market_deliver_day,
+         xs_yw_yk_order_info.unit_no,
+         xs_yw_yk_order_info.sap_mark,
+         '0' as firmed,
+         'new' as new_old,
+         '',
+         xs_yw_yk_order_info.plan_status,
+           xs_yw_yk_order_info.chehao,
+            xs_yw_yk_order_info.about_deliver_date :: varchar 
+    FROM jc_material,   
+         xs_yw_yk_order_info,   
+         jc_department,   
+         xs_yw_dept_2_deliver,  
+	 jc_units,
+         jc_materialunitexchange
+   WHERE ( jc_material.materialid = xs_yw_yk_order_info.mtrl_no ) and  
+         ( jc_department.departmentid = xs_yw_yk_order_info.ware_no ) and  
+         ( xs_yw_yk_order_info.ware_no = xs_yw_dept_2_deliver.departmentid ) and  
+         ( xs_yw_yk_order_info.mtrl_no = jc_materialunitexchange.materialid ) and  
+         ( xs_yw_yk_order_info.unit_no = jc_units.unit_gb ) and
+         ( jc_units.unit_no = jc_materialunitexchange.unit_no ) and
+         ( xs_yw_dept_2_deliver.loc_no = as_dept ) and  
+         ( xs_yw_yk_order_info.plan_status = '调度' ) and  
+         ( xs_yw_yk_order_info.assign_status = '预排') and
+         ( xs_yw_yk_order_info.about_deliver_date >= ( current_date - interval '6 month') ) and
+--         ( xs_yw_yk_order_info.about_deliver_date < (adt_date + interval '1 day')) and  
+         ( xs_yw_yk_order_info.plan_integer > 0 );
+
+
+--'产品产能分类'名称
+  update t2427detail
+  set mtrl_class = coalesce(t2427_cpcn_class.typename,''),
+      pin_str1 = (CASE WHEN (bill_type='销售') THEN (customer_no || series_no::varchar(10) || coalesce(t2427_cpcn_class.typename,'')) ELSE '' END )
+  from t2427_cpcn_class
+  where t2427detail.mtrl_no = t2427_cpcn_class.materialid ;
+
+--'第三层次分类'代码
+  update t2427detail
+  set class_no = t2427_r3_class.typecode
+  from t2427_r3_class
+  where t2427detail.mtrl_no = t2427_r3_class.materialid ;
+
+
+  -----------------------单品个数  start-------------------------
+  create temp table t2427_temp1
+  (
+   bill_type varchar(20) null ,
+   order_no integer,       --订单号
+   mtrl_no varchar(10),    --产品代码
+   num integer         
+  ) ON COMMIT DROP;
+
+  insert into t2427_temp1
+    select distinct bill_type, order_no ,mtrl_no,1
+    from t2427detail
+    where mtrl_class <> '';
+
+  create temp table t2427distmtrl
+  (
+    bill_type varchar(20) null ,
+    order_no integer,
+    num integer
+  ) ON COMMIT DROP;
+
+  insert into t2427distmtrl
+    select bill_type,order_no,sum(num)
+    from t2427_temp1
+    group by bill_type,order_no;
+
+  update t2427detail
+  set dan_num = t2427distmtrl.num
+  from t2427distmtrl
+  where t2427detail.bill_type = t2427distmtrl.bill_type and
+        t2427detail.order_no = t2427distmtrl.order_no ;
+  -----------------------单品个数  end-------------------------
+
+
+
+  -----------------------类个数  start------------------------
+  create temp table t2427_temp2
+  (
+   bill_type varchar(20) null ,
+   order_no integer,
+   mtrl_class varchar(16),
+   num integer
+  ) ON COMMIT DROP;
+
+  insert into t2427_temp2
+    select distinct bill_type,order_no,mtrl_class,1
+    from t2427detail
+    where mtrl_class <> '';
+
+  create temp table t2427_distmcls
+  (
+   bill_type varchar(20) null ,
+   order_no integer,
+   num integer
+  ) ON COMMIT DROP;
+
+  insert into t2427_distmcls
+    select bill_type,order_no,sum(num)
+    from t2427_temp2
+    group by bill_type,order_no;
+
+  update t2427detail
+  set lei_num = t2427_distmcls.num
+  from t2427_distmcls
+  where t2427detail.bill_type = t2427_distmcls.bill_type and
+        t2427detail.order_no = t2427_distmcls.order_no ; 
+  -----------------------类个数  end------------------------
+
+
+--主、辅客户代码
+create temp table t2404_zhufu_cus
+(
+ zhu_cusno varchar(10) null,        --主客户代码
+ fu_cusno  varchar(10) null         --副客户代码
+) ON COMMIT DROP;
+
+insert into t2404_zhufu_cus
+	select zhufu.zhu_cusno,
+	       zhufu.fu_cusno
+	from proc_get_zhu_fu_cusno_list() as  zhufu;
+
+--找到主客户代码
+update t2427detail
+set zhu_cusno = t2404_zhufu_cus.zhu_cusno
+from t2404_zhufu_cus
+where t2427detail.zhu_cusno = t2404_zhufu_cus.fu_cusno ;
+
+--库存卸库周期
+update t2427detail
+set stock_off = round(coalesce(xs_yw_customer_arrange.stock_off,0),2)
+from xs_yw_customer_arrange
+where t2427detail.zhu_cusno = xs_yw_customer_arrange.object_name and
+      t2427detail.class_no = xs_yw_customer_arrange.class_no and
+      xs_yw_customer_arrange.object_type = '客户' and
+      xs_yw_customer_arrange.new_mark = '1';
+
+-- 发货轮次
+--先得到当月已实发车数(订单数)
+create temp table t2404_shifa_ord
+(
+  pin_str1 varchar(200) default '',--拼字符串1( customer_no || series_no || mtrl_class )
+  order_no integer null,          --订单号
+  num integer null                --1
+) ON COMMIT DROP;
+
+insert into t2404_shifa_ord
+  (pin_str1,order_no,num)
+  select distinct xs_yw_sale_order_info.customer_no || xs_yw_sale_order_info.series_no::varchar(10) || coalesce(t2427_cpcn_class.typename,''),
+         xs_yw_sale_order_info.order_no,
+         1
+  from xs_yw_sale_order_info,t2427_cpcn_class,xs_yw_dept_2_deliver
+  where xs_yw_sale_order_info.mtrl_no = t2427_cpcn_class.materialid and
+      ( xs_yw_sale_order_info.ware_no = xs_yw_dept_2_deliver.departmentid ) and  
+	xs_yw_sale_order_info.deliver_date >= adt_start_deliver_date and
+	xs_yw_sale_order_info.plan_status in ('实发','开票','结案') and
+      ( xs_yw_sale_order_info.plan_integer > 0 ) and
+      ( xs_yw_dept_2_deliver.loc_no = as_dept ) and
+      ( xs_yw_sale_order_info.order_type = '正常' )   ;
+
+create temp table t2404_shifa_che
+(
+  pin_str1 varchar(200) default '',--拼字符串
+  che_no integer null             --车数
+) ON COMMIT DROP;
+
+--已发车数
+insert into t2404_shifa_che
+  select pin_str1,sum(num)
+  from t2404_shifa_ord
+  group by pin_str1;
+
+--更新已发车数
+update t2427detail
+set shifa_che = t2404_shifa_che.che_no
+from t2404_shifa_che
+where t2427detail.pin_str1 = t2404_shifa_che.pin_str1 ;
+
+--再得到 未发车数
+create temp table t2404_order_lst1
+( customer_no varchar(10) null,  --客户代码
+  series_no integer null,        --地址序号
+  mtrl_class varchar(30) null,   --产品类
+  order_no integer null,         --订单号
+  about_new_date timestamp null, --排序日期(本地:二次调度日期，异地:排货日期)
+  dispatch_time timestamp null,  --调度时间
+  pin_str14a varchar(200) null   --拼字符串
+) ON COMMIT DROP;
+
+--按 月份、客户、地址序号、产品类、订单号 精简数据 
+insert into t2404_order_lst1
+ (customer_no,series_no,mtrl_class,order_no,pin_str14a)
+ select distinct customer_no,series_no,mtrl_class,order_no, customer_no || series_no::varchar(10) || coalesce(mtrl_class,'') || order_no::varchar(10)  
+ from t2427so_weifa;
+
+--得到 排货日期 和 调度时间
+update t2404_order_lst1
+set about_new_date = t2427so_weifa.about_deliver_date ,
+    dispatch_time = t2427so_weifa.dispatch_time
+from t2427so_weifa
+where t2404_order_lst1.pin_str14a = t2427so_weifa.pin_str14a ;
+
+-- --排货日期在当月之前的订单，发货轮次统一显示为0
+-- delete from t2404_order_lst1
+-- where about_new_date < adt_start_deliver_date;
+
+create temp table t2404_order_lst3
+( deliver_order serial not null ,  --发货轮次
+  customer_no varchar(10) null,    --客户代码
+  series_no integer null,          --地址序号
+  mtrl_class varchar(30) null,     --产品类
+  order_no integer null,           --订单号
+  about_new_date timestamp null,   -- 排序日期(本地:二次调度日期，异地:排货日期)
+  dispatch_time timestamp null,    --调度时间
+  min_order integer null,          --最小发货次序
+  weifa_che integer null,          --真实的 发货轮次
+  pin_str1 varchar(200) default '',--拼字符串1( customer_no || series_no || mtrl_class )
+  pin_str14a varchar(200) default '' --拼字符串14b
+) ON COMMIT DROP;
+
+--排序,得到整表的序号 deliver_order
+insert into t2404_order_lst3
+  (customer_no,series_no,mtrl_class,order_no,about_new_date,dispatch_time,min_order,weifa_che,
+   pin_str1,pin_str14a)
+  select customer_no,series_no,mtrl_class,order_no,about_new_date,dispatch_time,0,-1, 
+	 customer_no || series_no::varchar(10) || coalesce(mtrl_class,'') , 
+	 customer_no || series_no::varchar(10) || coalesce(mtrl_class,'') || order_no::varchar(10)
+  from t2404_order_lst1
+  order by customer_no,series_no,mtrl_class,about_new_date,dispatch_time;
+
+create temp table t2404_order_min
+( pin_str1 varchar(200) default '', --拼字符串
+  min_order integer null          --最小发货次序
+) ON COMMIT DROP;
+
+--得到 每种情况的最小序号
+insert into t2404_order_min
+  select pin_str1,min(deliver_order)
+  from t2404_order_lst3
+  group by pin_str1;
+
+--更新得到 最小序号
+update t2404_order_lst3
+set min_order = t2404_order_min.min_order
+from t2404_order_min
+where t2404_order_lst3.pin_str1 = t2404_order_min.pin_str1 ;
+
+--更新得到 未发轮次 = 行序号 - 初始序号 + 1
+update t2404_order_lst3
+set weifa_che = deliver_order - min_order + 1 ;
+
+--得到 未发车数
+update t2427detail
+set weifa_che = t2404_order_lst3.weifa_che
+from t2404_order_lst3
+where t2427detail.pin_str14a = t2404_order_lst3.pin_str14a ;
+
+--行项目的发货轮次
+update t2427detail
+set item_che = shifa_che + weifa_che;
+
+--订单最小排货日期、报站时间
+create temp table t2404_the_date
+( bill_type varchar(20) null ,
+  order_no integer null,
+  about_deliver_date date null,    --排货日期
+  plan_time timestamp null         --报站时间
+) ON COMMIT DROP;
+
+--订单行项目最小排货日期、报站时间
+insert into t2404_the_date
+  select bill_type , order_no ,  min(about_deliver_date),min(plan_time)
+  from t2427detail
+  group by bill_type , order_no;
+
+update t2427detail
+set the_about_date = t2404_the_date.about_deliver_date,
+    the_plan_time = t2404_the_date.plan_time
+from t2404_the_date
+where t2427detail.bill_type = t2404_the_date.bill_type and
+      t2427detail.order_no = t2404_the_date.order_no;
+
+
+--订单最小发货轮次
+create temp table t2404_order_deliver_che
+( bill_type varchar(20) null ,
+  order_no integer null,
+  deliver_che integer default 0,   --发货轮次
+  about_deliver_date date null,    --排货日期
+  request_deliver_date date null,    --建议日期
+  plan_time timestamp null         --报站时间
+) ON COMMIT DROP;
+
+--订单行项目最小轮次、排货日期、报站时间
+insert into t2404_order_deliver_che
+  select bill_type , order_no , min(item_che) , min(about_deliver_date),min(plan_time),min(request_deliver_date)
+  from t2427detail
+  where mtrl_class > '' and item_che > 0
+  group by bill_type , order_no;
+
+update t2427detail
+set deliver_che = t2404_order_deliver_che.deliver_che,
+    the_about_date = t2404_order_deliver_che.about_deliver_date,
+    the_plan_time = t2404_order_deliver_che.plan_time,
+    the_request_deliver_date = t2404_order_deliver_che.request_deliver_date
+from t2404_order_deliver_che
+where t2427detail.bill_type = t2404_order_deliver_che.bill_type and
+      t2427detail.order_no = t2404_order_deliver_che.order_no;
+
+--最小库存卸库周期
+create temp table t2404_the_off
+( bill_type varchar(20) null ,
+  order_no integer null,
+  the_off numeric(20,2) default 0  --库存卸库周期
+) ON COMMIT DROP;
+
+insert into t2404_the_off
+  select bill_type , order_no , min(stock_off) 
+  from t2427detail
+  where class_no > '' and stock_off > 0
+  group by bill_type , order_no;
+
+update t2427detail
+set the_off = t2404_the_off.the_off
+from t2404_the_off
+where t2427detail.bill_type = t2404_the_off.bill_type and
+      t2427detail.order_no = t2404_the_off.order_no; 
+
+
+update t2427detail
+set street = xs_jc_sale_nation_info.object_name
+from xs_jc_sale_nation_info
+where xs_jc_sale_nation_info.object_code = t2427detail.street and
+      xs_jc_sale_nation_info.object_type = '乡镇街道';
+
+update t2427detail
+set city =jc_sale_city.city_name
+from jc_sale_city
+where t2427detail.city = jc_sale_city.city_no ;
+
+update t2427detail
+set pf_customer =jc_sale_customer.customer_name
+from jc_sale_customer
+where t2427detail.pf_customer = jc_sale_customer.customer_no ;
+
+for rec in execute 'select
+  bill_type,
+  order_no ,
+  order_itemno ,
+  customer_no ,
+  customer_name ,
+  mtrl_no ,
+  materialname ,
+  plan_integer ,
+  about_deliver_date ,
+  market_deliver_day ,
+  ware_no ,
+  entityname ,
+  plan_time ,
+  dispatch_time ,
+  unitweight ,
+  plan_weight ,
+  trans_way ,
+  series_no ,
+  deliver_type ,
+  deliver_note ,
+  goto_addr ,
+  district_name ,
+  typename ,
+  assign_status ,
+  dept_type ,
+  assign_integer ,
+  dept_date ,
+  unit_no ,
+  sap_mark ,
+  firmed ,
+  new_old ,
+  pin_no ,
+  pin_str1 ,
+  plan_status ,
+  mtrl_class ,
+  shifa_che ,
+  weifa_che ,
+  item_che ,
+  deliver_che ,
+  the_about_date,
+  the_plan_time,
+  the_off,
+  class_no ,
+  zhu_cusno ,
+  stock_off ,
+  lei_num , 
+  dan_num,
+  city,
+  street,
+  pf_customer,
+  pin_order,
+  about_deliver_text
+  from t2427detail
+  order by market_deliver_day asc, pin_order :: integer asc ,the_about_date asc,the_request_deliver_date asc,the_plan_time asc,bill_type asc,order_no asc,order_itemno asc ' 
+
+loop 
+return next rec ;
+end loop ;
+
+
+end
+$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100
+  ROWS 1000

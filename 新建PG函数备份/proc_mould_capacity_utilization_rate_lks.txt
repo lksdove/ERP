@@ -1,0 +1,264 @@
+CREATE OR REPLACE FUNCTION "mes"."proc_mould_capacity_utilization_rate_lks"("area" varchar, "place" varchar, "daynum" int4, "line_type" varchar, "show_request" bool, "show_yuque" bool, "show_rate" bool)
+  RETURNS SETOF "pg_catalog"."record" AS $BODY$
+	declare rs record ; --结果集
+	--分别获取五种产线类型
+	--	004 	罐头线
+	--  005   利乐包线
+	--	003		奶线
+	--	001		热灌装线
+	--	002		水汽线
+BEGIN
+create local TEMPORARY table temp_sum
+(
+	pianqu varchar(16) null,
+	production_place_name varchar(32) null,
+	factory_code varchar(20) null,
+	factory_name varchar(64) null,
+	production_line_code varchar(20) null,
+	production_line_name varchar(64) null,
+	mould_name varchar(20) null,  
+	ability_integer int4 null,
+	request_integer int4 null, 
+	yuque int4 null,
+	rate NUMERIC(10,4) null
+)ON COMMIT DROP;
+
+create local TEMPORARY table temp_result_area_country
+(
+	pianqu varchar(16) null,
+	mould_name varchar(20) null,
+	ability_integer int4 null,
+	request_integer int4 null, 
+	yuque int4 null,
+	rate NUMERIC(10,4) null
+)ON COMMIT DROP;
+
+
+create local TEMPORARY table temp_result
+(
+	pianqu varchar(16) null,
+	production_place_name varchar(32) null,
+	factory_code varchar(20) null,
+	factory_name varchar(64) null,
+	production_line_code varchar(20) null,
+	production_line_name varchar(64) null,
+	mould_name varchar(20) null,
+	temp_result NUMERIC(12,4) null,
+	project varchar(20) null,
+	item_sort int4 null
+)ON COMMIT DROP;
+
+create local TEMPORARY table temp_result_order
+(
+	pianqu varchar(16) null,
+	production_place_name varchar(32) null,
+	factory_code varchar(20) null,
+	factory_name varchar(64) null,
+	production_line_code varchar(20) null,
+	production_line_name varchar(64) null,
+	mould_name varchar(20) null,
+	temp_result NUMERIC(12,4) null,
+	project varchar(20) null
+)ON COMMIT DROP;
+
+
+
+--拼装出历史表和工厂-产线-模具-产能表的新增数据
+insert into temp_sum
+(select 
+	jcpp.pianqu,
+	pp.production_place_name,
+	a.factory_code,
+	mf.factory_name,
+	a.production_line_code,
+	pl.production_line_name,
+	mmcv.material_character_value as mould_name,
+	round(daynum*sum(ability.ability_integer)/count(1)) as ability_integer,
+	sum(a.history_output5) as request_integer,
+	round(daynum*sum(ability.ability_integer)/count(1)) - COALESCE(sum(a.history_output5)) as yuque,
+	round(sum(a.history_output5)*1.0/(daynum*sum(ability.ability_integer)/count(1)),4) as rate
+from mes_history_output a
+JOIN mdm_material_character_value mmcv 
+ON mmcv.is_valid = '有效' AND mmcv.material_code = a.material_code_product AND mmcv.character_code = 'CN_MJ_ONLY'
+join mdm_material_classification c
+on a.material_code_product = c.material_code and c.is_valid = '有效'
+join mdm_classification d
+on d.classification_type = '055' and d.classification_code = c.classification_code and d.is_valid = '有效'
+JOIN mes_line_ability ability
+ON ability.factory_code = a.factory_code and ability.production_line_code = a.production_line_code 
+and ability.ability_type = d.classification_code and ability.is_valid = '有效'
+join mdm_factory_production_place p
+on p.factory_code = a.factory_code and p.is_valid = '有效'
+join mdm_production_place pp
+on pp.production_place_code = p.production_place_code and pp.is_valid = '有效'
+join xs_jc_place_pianqu jcpp
+on jcpp.place_code = pp.production_place_code
+join mdm_factory mf
+on mf.factory_code = a.factory_code and mf.is_valid = '有效'
+join mdm_production_line pl
+on pl.factory_code = a.factory_code and pl.production_line_code = a.production_line_code and pl.is_valid = '有效'
+join mdm_dictionary_item mdi
+on mdi.classification = '生产线类型' and mdi.item_code = pl.production_line_type and mdi.is_valid = '有效'
+where a.is_valid = '有效'
+and jcpp.pianqu like area
+and p.production_place_code like place
+and mdi.item_value = line_type
+
+GROUP BY 
+	jcpp.pianqu,
+	pp.production_place_name,
+	a.factory_code,
+	mf.factory_name,
+	a.production_line_code,
+	pl.production_line_name,
+	mmcv.material_character_value
+
+union all
+
+select 
+	jcpp.pianqu,
+	pp.production_place_name,
+	ma.factory_code,
+	mf.factory_name,
+	ma.production_line_code,
+	pl.production_line_name,
+	ma.mould_name,
+	ma.ability_integer * daynum as ability_integer,
+	null as request_integer,
+	ma.ability_integer * daynum as yuque,
+	null as rate
+from mes_mould_ability ma
+join mdm_factory_production_place p
+on p.factory_code = ma.factory_code and p.is_valid = '有效'
+join mdm_production_place pp
+on pp.production_place_code = p.production_place_code and pp.is_valid = '有效'
+join xs_jc_place_pianqu jcpp
+on jcpp.place_code = pp.production_place_code
+join mdm_factory mf
+on mf.factory_code = ma.factory_code and mf.is_valid = '有效'
+join mdm_production_line pl
+on pl.factory_code = ma.factory_code and pl.production_line_code = ma.production_line_code and pl.is_valid = '有效'
+join mdm_dictionary_item mdi
+on mdi.classification = '生产线类型' and mdi.item_code = pl.production_line_type and mdi.is_valid = '有效'
+where ma.data_type = '新增'
+and ma.is_valid = '有效'
+and jcpp.pianqu like area
+and p.production_place_code like place
+and mdi.item_value = line_type
+);
+
+--每条数据有四个类型
+insert into temp_result
+select pianqu,production_place_name,factory_code,factory_name,production_line_code,
+production_line_name,mould_name,ability_integer,'自定义产能',0
+from temp_sum;
+
+if show_request then 
+insert into temp_result
+select pianqu,production_place_name,factory_code,factory_name,production_line_code,
+production_line_name,mould_name,request_integer,'自定义需求一',1
+from temp_sum;
+end if;
+
+if show_yuque then 
+insert into temp_result
+select pianqu,production_place_name,factory_code,factory_name,production_line_code,
+production_line_name,mould_name,yuque,'余缺一',2
+from temp_sum;
+end if;
+
+if show_rate then 
+insert into temp_result
+select pianqu,production_place_name,factory_code,factory_name,production_line_code,
+production_line_name,mould_name,rate,'模具利用率',3
+from temp_sum;
+end if;
+
+--排序
+insert into temp_result_order
+select pianqu,production_place_name,factory_code,factory_name,
+production_line_code,production_line_name,mould_name,temp_result,project
+from temp_result order by pianqu,production_place_name,factory_code,
+production_line_code,item_sort;
+
+--删除temp_result，开始进行片区汇总
+delete from temp_result;
+insert into temp_result_area_country
+select pianqu || '汇总',mould_name,
+	sum(ability_integer),
+	sum(COALESCE(request_integer,0)),
+	sum(ability_integer) - sum(COALESCE(request_integer,0)),
+	round(sum(COALESCE(request_integer,0))/sum(ability_integer),4)
+from temp_sum
+GROUP BY pianqu,mould_name;
+
+insert into temp_result(pianqu,mould_name,temp_result,project,item_sort)
+select pianqu,mould_name,ability_integer,'自定义产能',0
+from temp_result_area_country;
+
+if show_request then
+insert into temp_result(pianqu,mould_name,temp_result,project,item_sort)
+select pianqu,mould_name,request_integer,'自定义需求一',1
+from temp_result_area_country;
+end if;
+
+if show_yuque then 
+insert into temp_result(pianqu,mould_name,temp_result,project,item_sort)
+select pianqu,mould_name,yuque,'余缺一',2
+from temp_result_area_country;
+end if;
+
+if show_rate then 
+insert into temp_result(pianqu,mould_name,temp_result,project,item_sort)
+select pianqu,mould_name,rate,'模具利用率',3
+from temp_result_area_country;
+end if;
+--排序
+insert into temp_result_order
+select pianqu,production_place_name,factory_code,factory_name,
+production_line_code,production_line_name,mould_name,temp_result,project
+from temp_result order by pianqu,production_place_name,factory_code,
+production_line_code,item_sort;
+
+--全国汇总
+delete from temp_result_area_country;
+insert into temp_result_area_country
+select '全国汇总',mould_name,
+	sum(ability_integer),
+	sum(COALESCE(request_integer,0)),
+	sum(ability_integer) - sum(COALESCE(request_integer,0)),
+	round(sum(COALESCE(request_integer,0))/sum(ability_integer),4)
+from temp_sum
+GROUP BY mould_name;
+
+insert into temp_result_order(pianqu,mould_name,temp_result,project)
+select pianqu,mould_name,ability_integer,'自定义产能'
+from temp_result_area_country;
+
+if show_request then
+insert into temp_result_order(pianqu,mould_name,temp_result,project)
+select pianqu,mould_name,request_integer,'自定义需求一'
+from temp_result_area_country;
+end if;
+
+if show_yuque then 
+insert into temp_result_order(pianqu,mould_name,temp_result,project)
+select pianqu,mould_name,yuque,'余缺一'
+from temp_result_area_country;
+end if;
+
+if show_rate then 
+insert into temp_result_order(pianqu,mould_name,temp_result,project)
+select pianqu,mould_name,rate,'模具利用率'
+from temp_result_area_country;
+end if;
+	
+for rs in execute 'select * from temp_result_order' 
+loop 
+  return next rs ;
+end loop ;
+
+END$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100
+  ROWS 1000

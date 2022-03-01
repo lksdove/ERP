@@ -1,0 +1,21 @@
+CREATE OR REPLACE FUNCTION "public"."proc_get_undeli_weight_fsy"("as_ware" varchar, "adt_date" timestamp)
+  RETURNS TABLE("series_no" int4, "total_undeli_weight" numeric) AS $BODY$
+
+SELECT  xs_yw_sale_order_info.series_no ,
+        round(sum(xs_yw_sale_order_info.plan_integer * jc_materialunitexchange.unitweight/1000),4) as total_undeli_weight        
+      FROM xs_yw_sale_order_info ,jc_materialunitexchange,
+           xs_yw_dept_2_deliver     
+      WHERE ( xs_yw_sale_order_info.mtrl_no = jc_materialunitexchange.materialid ) and   
+            ( xs_yw_sale_order_info.unit_no = jc_materialunitexchange.unit_gb )  and  
+            ( xs_yw_dept_2_deliver.departmentid = xs_yw_sale_order_info.ware_no ) and  
+            (( xs_yw_sale_order_info.plan_status = '调度' and xs_yw_sale_order_info.assign_status in ('初始','确认','审核' ) ) or
+            xs_yw_sale_order_info.plan_status = '打印出库单')  and
+            ( xs_yw_sale_order_info.market_deliver_day >= $2 - interval '4 month' ) and        
+            --( xs_yw_sale_order_info.market_deliver_day <= '2015.3.20' ) and        
+            ( xs_yw_dept_2_deliver.loc_no = $1 ) 
+    group by xs_yw_sale_order_info.series_no ;
+ 
+$BODY$
+  LANGUAGE sql VOLATILE
+  COST 100
+  ROWS 1000

@@ -1,0 +1,531 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.whhim.erp.mes.api.mapper.mes.dao.baseData.ReportQueryMapper">
+
+    <select id="getMesJckhCostCalculateThreeLevel"
+            resultType="com.whhim.erp.mes.api.mapper.mes.dto.report.MesJckhCostCalculateThreeLevel">
+        select
+        a.process_order_no as final_process_order,
+        a.material_code_product as final_material_code,
+        mp.base_unit as final_material_unit,
+        b.factory_code,
+        b.product_date,
+        case when cast(to_char(b.product_date + INTERVAL '1 month', 'yyyy-mm') || '-01' as timestamp) - INTERVAL '1 day'
+        = b.product_date
+        and b.work_class_name = '中班'
+        then b.product_date + INTERVAL '1 day'
+        else b.product_date end order_date,
+        b.work_team_name,
+        b.work_class_name,
+        a.actual_output,
+        ps.product_specification,
+        --一级展开
+        cm1.process_order_no as process_order_no_one,
+        a.material_code_product as material_material_code_one,
+        mp.base_unit as base_unit_one,
+        cm1.material_code_stuff as material_code_stuff_one,
+        cm1.batch_stuff as batch_stuff_one,
+        ms1.material_made_type as material_made_type_one,
+        case when bw.id is NULL or jwm.id is NULL then ''
+        else '是' end as if_weight,
+        cm1.consume_quantity as consume_quantity_one,
+        round((a.actual_output/ob1.fundamental_quantity_bom) * ob1.quota_quantity,6) as theortical_consume_one,
+        round((a.actual_output/ob1.fundamental_quantity_bom) * ob1.quota_quantity * (1+COALESCE(ob1.loss_rate,0)/100),6)
+        as quota_consume_one,
+        voucher1.untax_amount as actual_money_one,
+        --二级展开
+        cm2.process_order_no as process_order_no_two,
+        cm1.material_code_stuff as material_material_code_two,
+        ms1.base_unit as base_unit_two,
+        cm2.material_code_stuff as material_code_stuff_two,
+        cm2.batch_stuff as batch_stuff_two,
+        ms2.material_made_type as material_made_type_two,
+        case when protein.id is NULL or proteinjckh.id is NULL then ''
+        else '是' end as if_protein_two,
+        case when os2.process_order_no is null
+        then cm2.consume_quantity
+        else round(cm2.consume_quantity * (cm2.consume_quantity/os2.actual_output),6) end as consume_quantity_two,
+        case when os2.process_order_no is null
+        then round((order2.actual_output/ob2.fundamental_quantity_bom) * ob2.quota_quantity,6)
+        else round((order2.actual_output/ob2.fundamental_quantity_bom) * ob2.quota_quantity *
+        (cm2.consume_quantity/os2.actual_output),6) end as theortical_consume_two,
+        case when os2.process_order_no is null
+        then round((order2.actual_output/ob2.fundamental_quantity_bom) * ob2.quota_quantity *
+        (1+COALESCE(ob1.loss_rate,0)/100),6)
+        else round((order2.actual_output/ob2.fundamental_quantity_bom) * ob2.quota_quantity *
+        (1+COALESCE(ob1.loss_rate,0)/100) * (cm2.consume_quantity/os2.actual_output),3) end as quota_consume_two,
+        voucher2.untax_amount as actual_money_two,
+        --三级展开
+        cm3.process_order_no as process_order_no_three,
+        cm2.material_code_stuff as material_material_code_three,
+        ms2.base_unit as base_unit_three,
+        cm3.material_code_stuff as material_code_stuff_three,
+        cm3.batch_stuff as batch_stuff_three,
+        ms3.material_made_type as material_made_type_three,
+        cm3.consume_quantity as consume_quantity_three,
+        case when os3.process_order_no is null
+        then cm3.consume_quantity
+        else round(cm3.consume_quantity * (cm3.consume_quantity/os3.actual_output),6) end as consume_quantity_three,
+        case when os3.process_order_no is null
+        then round((order3.actual_output/ob3.fundamental_quantity_bom) * ob3.quota_quantity,6)
+        else round((order3.actual_output/ob3.fundamental_quantity_bom) * ob3.quota_quantity *
+        (cm3.consume_quantity/os3.actual_output),6) end as theortical_consume_three,
+        case when os3.process_order_no is null
+        then round((order3.actual_output/ob3.fundamental_quantity_bom) * ob3.quota_quantity *
+        (1+COALESCE(ob2.loss_rate,0)/100),6)
+        else round((order3.actual_output/ob3.fundamental_quantity_bom) * ob3.quota_quantity *
+        (1+COALESCE(ob2.loss_rate,0)/100) * (cm3.consume_quantity/os3.actual_output),6) end as quota_consume_three,
+        voucher3.untax_amount as actual_money_three
+        --主数据
+        from mes_process_order a
+        join mdm_material mp
+        on mp.material_code = a.material_code_product and mp.is_valid = '有效' and mp.material_type in
+        ('FERT','VERP','ROH')
+        LEFT join mdm_product_specification ps
+        on ps.product_specification_code = mp.specification and ps.is_valid = '有效'
+        join mes_work_order b
+        on a.work_order_no = b.work_order_no and b.is_valid = '有效'
+        left join (SELECT
+        a.id,
+        a.material_code_bottle,
+        a.work_center_code,
+        a.bottle_weight,
+        a.loss_rate
+        FROM "mes_bottle_weight" a
+        where a.factory_code = #{factoryCode}
+        and a.valid_begin &lt;= NOW()
+        and a.valid_end >= NOW()
+        and a.is_valid = '有效'
+        and a.status = '审核'
+        and NOT EXISTS (select id from mes_bottle_weight b
+        where
+        b.valid_begin &lt;= NOW()
+        and b.valid_end >= NOW()
+        and a.factory_code = b.factory_code
+        and a.material_code_bottle = b.material_code_bottle
+        and a.work_center_code = b.work_center_code
+        and a.valid_begin &lt; b.valid_begin)) as bw
+        on bw.material_code_bottle = a.material_code_product and bw.work_center_code = a.work_center_code
+        --一级展开表
+        left join mes_consume_material cm1
+        on cm1.process_order_no = a.process_order_no and cm1.is_valid = '有效'
+        left join mdm_material ms1
+        on ms1.material_code = cm1.material_code_stuff and ms1.is_valid = '有效'
+        left join mes_order_bom ob1
+        on ob1.process_order_no = cm1.process_order_no and ob1.material_code_stuff = cm1.material_code_stuff and
+        ob1.is_valid = '有效'
+        left join wms_matnr_voucher_item voucher1
+        on voucher1.voucher_code = a.consume_document and voucher1.matnr = cm1.material_code_stuff and voucher1.factory
+        = b.factory_code
+        and voucher1.stock_place = cm1.warehouse_code_out and voucher1.batch_number = cm1.batch_stuff
+        left join mes_output_semi os
+        on os.batch = cm1.batch_stuff and os.is_valid = '有效' and os.status = '已确认'
+        left join mes_jckh_weight_material jwm
+        on jwm.weight_material_code = cm1.material_code_stuff and jwm.is_valid = '有效'
+        left join (SELECT
+        a.id,
+        a.slurry_code,
+        a.assess_type,
+        a.protein_whey,
+        a.protein_whole_fat,
+        a.protein_defat,
+        a.protein_total
+        FROM "mes_jckh_slurry_protein" a
+        where a.valid_begin &lt;= NOW()
+        and a.valid_end >= NOW()
+        and a.is_valid = '有效'
+        and NOT EXISTS (select id from mes_jckh_slurry_protein b
+        where
+        b.valid_begin &lt;= NOW()
+        and b.is_valid = '有效'
+        and b.valid_end >= NOW()
+        and a.slurry_code = b.slurry_code
+        and a.valid_begin &lt; b.valid_begin)) as protein
+        on protein.slurry_code = cm1.material_code_stuff
+        --二级展开表
+        left join mes_consume_material cm2
+        on cm2.process_order_no = os.process_order_no and ms1.material_made_type in ('BLJ','BPG') and cm2.is_valid =
+        '有效'
+        left join mes_process_order order2
+        on order2.process_order_no = cm2.process_order_no and order2.is_valid = '有效'
+        left join mes_work_order work2
+        on order2.work_order_no = work2.work_order_no and work2.is_valid = '有效'
+        left join mdm_material ms2
+        on ms2.material_code = cm2.material_code_stuff and ms2.is_valid = '有效'
+        left join mes_order_bom ob2
+        on ob2.process_order_no = cm2.process_order_no and ob2.material_code_stuff = cm2.material_code_stuff and
+        ob2.is_valid = '有效'
+        left join wms_matnr_voucher_item voucher2
+        on voucher2.voucher_code = order2.consume_document and voucher2.matnr = cm2.material_code_stuff and
+        voucher2.factory = work2.factory_code
+        and voucher2.stock_place = cm2.warehouse_code_out and voucher2.batch_number = cm2.batch_stuff
+        left join mes_output_semi os2
+        on os2.batch = cm2.batch_stuff and os2.is_valid = '有效' and os2.status = '已确认'
+        left join mes_jckh_protein_material proteinjckh
+        on proteinjckh.protein_material_code = cm2.material_code_stuff and proteinjckh.is_valid = '有效'
+        --三级展开表
+        left join mes_consume_material cm3
+        on cm3.process_order_no = os2.process_order_no and ms2.material_made_type = 'BLJ' and cm3.is_valid = '有效'
+        left join mes_process_order order3
+        on order3.process_order_no = cm3.process_order_no and order3.is_valid = '有效'
+        left join mes_work_order work3
+        on order3.work_order_no = work3.work_order_no and work3.is_valid = '有效'
+        left join mdm_material ms3
+        on ms3.material_code = cm3.material_code_stuff and ms3.is_valid = '有效'
+        left join mes_order_bom ob3
+        on ob3.process_order_no = cm3.process_order_no and ob3.material_code_stuff = cm3.material_code_stuff and
+        ob3.is_valid = '有效'
+        left join wms_matnr_voucher_item voucher3
+        on voucher3.voucher_code = order3.consume_document and voucher3.matnr = cm3.material_code_stuff and
+        voucher3.factory = work3.factory_code
+        and voucher3.stock_place = cm3.warehouse_code_out and voucher3.batch_number = cm3.batch_stuff
+        left join mes_output_semi os3
+        on os3.batch = cm3.batch_stuff and ms3.material_made_type = 'BLJ' and os3.is_valid = '有效' and os3.status = '已确认'
+
+        where a.is_valid = '有效'
+        and a.actual_output > 0
+        and a.status_consume = '已确认'
+        and b.factory_code = #{factoryCode}
+        and b.product_date = #{productDate}
+        order by a.process_order_no
+    </select>
+    <select id="getMesJckhWeight"
+            resultType="com.whhim.erp.mes.api.mapper.mes.dto.report.MesJckhCostCalculateThreeLevel">
+        select
+        a.process_order_no as final_process_order,
+        a.material_code_product as final_material_code,
+        mp.base_unit as final_material_unit,
+        b.factory_code,
+        b.product_date,
+        case when cast(to_char(b.product_date + INTERVAL '1 month', 'yyyy-mm') || '-01' as timestamp) - INTERVAL '1 day'
+        = b.product_date
+        and b.work_class_name = '中班'
+        then b.product_date + INTERVAL '1 day'
+        else b.product_date end order_date,
+        b.work_team_name,
+        b.work_class_name,
+        a.actual_output,
+        ps.product_specification,
+        --一级展开
+        cm1.process_order_no as process_order_no_one,
+        a.material_code_product as material_material_code_one,
+        mp.base_unit as base_unit_one,
+        '克重' as material_code_stuff_one,
+        sum(cm1.consume_quantity) as consume_quantity_one,
+        round((a.actual_output/10000) * bw.bottle_weight,6) as theortical_consume_one,
+        round((a.actual_output/10000) * bw.bottle_weight,6) as quota_consume_one,
+        sum(voucher1.untax_amount) as actual_money_one
+
+        from mes_process_order a
+        join mdm_material mp
+        on mp.material_code = a.material_code_product and mp.is_valid = '有效' and mp.material_type = 'VERP'
+        LEFT join mdm_product_specification ps
+        on ps.product_specification_code = mp.specification and ps.is_valid = '有效'
+        join mes_work_order b
+        on a.work_order_no = b.work_order_no and b.is_valid = '有效'
+        join (SELECT
+        a.id,
+        a.material_code_bottle,
+        a.work_center_code,
+        a.bottle_weight,
+        a.loss_rate
+        FROM "mes_bottle_weight" a
+        where a.factory_code = #{factoryCode}
+        and a.valid_begin &lt;= NOW()
+        and a.valid_end >= NOW()
+        and a.is_valid = '有效'
+        and a.status = '审核'
+        and NOT EXISTS (select id from mes_bottle_weight b
+        where
+        b.valid_begin &lt;= NOW()
+        and b.valid_end >= NOW()
+        and a.factory_code = b.factory_code
+        and a.material_code_bottle = b.material_code_bottle
+        and a.work_center_code = b.work_center_code
+        and a.valid_begin &lt; b.valid_begin)) as bw
+        on bw.material_code_bottle = a.material_code_product and bw.work_center_code = a.work_center_code
+
+
+        join mes_consume_material cm1
+        on cm1.process_order_no = a.process_order_no and cm1.is_valid = '有效'
+        left join mdm_material ms1
+        on ms1.material_code = cm1.material_code_stuff and ms1.is_valid = '有效'
+        left join mes_order_bom ob1
+        on ob1.process_order_no = cm1.process_order_no and ob1.material_code_stuff = cm1.material_code_stuff and
+        ob1.is_valid = '有效'
+        left join wms_matnr_voucher_item voucher1
+        on voucher1.voucher_code = a.consume_document and voucher1.matnr = cm1.material_code_stuff and voucher1.factory
+        = b.factory_code
+        and voucher1.stock_place = cm1.warehouse_code_out and voucher1.batch_number = cm1.batch_stuff
+        left join mes_output_semi os
+        on os.batch = cm1.batch_stuff and os.is_valid = '有效' and os.status = '已确认'
+        join mes_jckh_weight_material jwm
+        on jwm.weight_material_code = cm1.material_code_stuff and jwm.is_valid = '有效'
+
+
+        where a.is_valid = '有效'
+        and a.actual_output > 0
+        and a.status_consume = '已确认'
+        and b.factory_code = #{factoryCode}
+        and b.product_date = #{productDate}
+
+        GROUP BY
+        a.process_order_no,
+        a.material_code_product,
+        mp.base_unit,
+        b.factory_code,
+        b.product_date,
+        b.work_team_name,
+        b.work_class_name,
+        a.actual_output,
+        ps.product_specification,
+        cm1.process_order_no,
+        a.material_code_product,
+        mp.base_unit,
+        bw.bottle_weight
+
+    </select>
+    <select id="getProteinSeparateAssessment"
+            resultType="com.whhim.erp.mes.api.mapper.mes.dto.report.MesJckhCostCalculateThreeLevel">
+        select
+        a.process_order_no as final_process_order,
+        a.material_code_product as final_material_code,
+        mp.base_unit as final_material_unit,
+        b.factory_code,
+        b.product_date,
+        case when cast(to_char(b.product_date + INTERVAL '1 month', 'yyyy-mm') || '-01' as timestamp) - INTERVAL '1 day'
+        = b.product_date
+        and b.work_class_name = '中班'
+        then b.product_date + INTERVAL '1 day'
+        else b.product_date end order_date,
+        b.work_team_name,
+        b.work_class_name,
+        a.actual_output,
+        ps.product_specification,
+        cm2.process_order_no as process_order_no_two,
+        cm1.material_code_stuff as material_material_code_two,
+        ms1.base_unit as base_unit_two,
+        proteinjckh.protein_type as material_code_stuff_two,
+
+        round((wbc.character_value::DECIMAL/100) * cm2.consume_quantity ,6) as consume_quantity_two,
+        case when proteinjckh.protein_type = '乳清蛋白'
+        then round(cm1.consume_quantity * protein.protein_whey,6)
+        when proteinjckh.protein_type = '全脂蛋白'
+        then round(cm1.consume_quantity * protein.protein_whole_fat,6)
+        else round(cm1.consume_quantity * protein.protein_defat,6)
+        end as theortical_consume_two,
+        case when proteinjckh.protein_type = '乳清蛋白'
+        then round(cm1.consume_quantity * protein.protein_whey * (1+COALESCE(ob1.loss_rate,0)/100),6)
+        when proteinjckh.protein_type = '全脂蛋白'
+        then round(cm1.consume_quantity * protein.protein_whole_fat * (1+COALESCE(ob1.loss_rate,0)/100),6)
+        else round(cm1.consume_quantity * protein.protein_defat * (1+COALESCE(ob1.loss_rate,0)/100),6)
+        end as quota_consume_two,
+        round(item.item_value::DECIMAL * ((wbc.character_value::DECIMAL/100) * cm2.consume_quantity) ,6) as
+        actual_money_two
+
+
+        from mes_process_order a
+        join mdm_material mp
+        on mp.material_code = a.material_code_product and mp.is_valid = '有效' and mp.material_type = 'FERT'
+        LEFT join mdm_product_specification ps
+        on ps.product_specification_code = mp.specification and ps.is_valid = '有效'
+        join mes_work_order b
+        on a.work_order_no = b.work_order_no and b.is_valid = '有效'
+        left join mes_dictionary_item item
+        on item.classification = '单价' and item.item_code = 'protein_price' and item.is_valid = '有效'
+
+        left join mes_consume_material cm1
+        on cm1.process_order_no = a.process_order_no and cm1.is_valid = '有效'
+        left join mdm_material ms1
+        on ms1.material_code = cm1.material_code_stuff and ms1.is_valid = '有效'
+        left join mes_order_bom ob1
+        on ob1.process_order_no = cm1.process_order_no and ob1.material_code_stuff = cm1.material_code_stuff and
+        ob1.is_valid = '有效'
+        left join wms_matnr_voucher_item voucher1
+        on voucher1.voucher_code = a.consume_document and voucher1.matnr = cm1.material_code_stuff and voucher1.factory
+        = b.factory_code
+        and voucher1.stock_place = cm1.warehouse_code_out and voucher1.batch_number = cm1.batch_stuff
+        left join mes_output_semi os
+        on os.batch = cm1.batch_stuff and os.is_valid = '有效' and os.status = '已确认'
+        join (SELECT
+        a.id,
+        a.slurry_code,
+        a.assess_type,
+        a.protein_whey,
+        a.protein_whole_fat,
+        a.protein_defat,
+        a.protein_total
+        FROM "mes_jckh_slurry_protein" a
+        where a.valid_begin &lt;= NOW()
+        and a.valid_end >= NOW()
+        and a.is_valid = '有效'
+        and NOT EXISTS (select id from mes_jckh_slurry_protein b
+        where
+        b.valid_begin &lt;= NOW()
+        and b.is_valid = '有效'
+        and b.valid_end >= NOW()
+        and a.slurry_code = b.slurry_code
+        and a.valid_begin &lt; b.valid_begin)) as protein
+        on protein.slurry_code = cm1.material_code_stuff and protein.assess_type = '1'
+
+        left join mes_consume_material cm2
+        on cm2.process_order_no = os.process_order_no and ms1.material_made_type = 'BLJ' and cm2.is_valid = '有效'
+        left join mes_process_order order2
+        on order2.process_order_no = cm2.process_order_no and order2.is_valid = '有效'
+        left join mes_work_order work2
+        on order2.work_order_no = work2.work_order_no and work2.is_valid = '有效'
+        left join mdm_material ms2
+        on ms2.material_code = cm2.material_code_stuff and ms2.is_valid = '有效'
+        left join mes_order_bom ob2
+        on ob2.process_order_no = cm2.process_order_no and ob2.material_code_stuff = cm2.material_code_stuff and
+        ob2.is_valid = '有效'
+        left join wms_matnr_voucher_item voucher2
+        on voucher2.voucher_code = order2.consume_document and voucher2.matnr = cm2.material_code_stuff and
+        voucher2.factory = work2.factory_code
+        and voucher2.stock_place = cm2.warehouse_code_out and voucher2.batch_number = cm2.batch_stuff
+        left join mes_output_semi os2
+        on os2.batch = cm2.batch_stuff and os2.is_valid = '有效' and os2.status = '已确认'
+        join mes_jckh_protein_material proteinjckh
+        on proteinjckh.protein_material_code = cm2.material_code_stuff and proteinjckh.is_valid = '有效'
+        left join wms_batch_property wbp
+        on wbp.matnr = cm2.material_code_stuff and wbp.factory = work2.factory_code and wbp.batch_number =
+        cm2.batch_stuff
+        left join wms_batch_character wbc
+        on wbc.target_code = wbp.inner_number and wbc.character = 'Z_PROTEIN_CONTENT'
+
+        where a.is_valid = '有效'
+        and a.actual_output > 0
+        and a.status_consume = '已确认'
+        and b.factory_code = #{factoryCode}
+        and b.product_date = #{productDate}
+    </select>
+    <select id="getProteinTotalAssessment"
+            resultType="com.whhim.erp.mes.api.mapper.mes.dto.report.MesJckhCostCalculateThreeLevel">
+        select
+        a.process_order_no as final_process_order,
+        a.material_code_product as final_material_code,
+        mp.base_unit as final_material_unit,
+        b.factory_code,
+        b.product_date,
+        case when cast(to_char(b.product_date + INTERVAL '1 month', 'yyyy-mm') || '-01' as timestamp) - INTERVAL '1 day'
+        = b.product_date
+        and b.work_class_name = '中班'
+        then b.product_date + INTERVAL '1 day'
+        else b.product_date end order_date,
+        b.work_team_name,
+        b.work_class_name,
+        a.actual_output,
+        ps.product_specification,
+
+        --二级展开
+        cm2.process_order_no as process_order_no_two,
+        cm1.material_code_stuff as material_material_code_two,
+        ms1.base_unit as base_unit_two,
+        '蛋白合计' as material_code_stuff_two,
+
+        sum(round((wbc.character_value::DECIMAL/100) * cm2.consume_quantity ,6)) as consume_quantity_two,
+        sum(case when proteinjckh.protein_type = '乳清蛋白'
+        then round(cm1.consume_quantity * protein.protein_whey,6)
+        when proteinjckh.protein_type = '全脂蛋白'
+        then round(cm1.consume_quantity * protein.protein_whole_fat,6)
+        else round(cm1.consume_quantity * protein.protein_defat,6)
+        end) as theortical_consume_two,
+        sum(case when proteinjckh.protein_type = '乳清蛋白'
+        then round(cm1.consume_quantity * protein.protein_whey * (1+COALESCE(ob1.loss_rate,0)/100),6)
+        when proteinjckh.protein_type = '全脂蛋白'
+        then round(cm1.consume_quantity * protein.protein_whole_fat * (1+COALESCE(ob1.loss_rate,0)/100),6)
+        else round(cm1.consume_quantity * protein.protein_defat * (1+COALESCE(ob1.loss_rate,0)/100),6)
+        end) as quota_consume_two,
+        sum(item.item_value::DECIMAL * round((wbc.character_value::DECIMAL/100) * cm2.consume_quantity ,6)) as
+        actual_money_two
+
+        --主数据
+        from mes_process_order a
+        join mdm_material mp
+        on mp.material_code = a.material_code_product and mp.is_valid = '有效' and mp.material_type = 'FERT'
+        LEFT join mdm_product_specification ps
+        on ps.product_specification_code = mp.specification and ps.is_valid = '有效'
+        join mes_work_order b
+        on a.work_order_no = b.work_order_no and b.is_valid = '有效'
+        left join mes_dictionary_item item
+        on item.classification = '单价' and item.item_code = 'protein_price' and item.is_valid = '有效'
+
+        --一级展开表
+        left join mes_consume_material cm1
+        on cm1.process_order_no = a.process_order_no and cm1.is_valid = '有效'
+        left join mdm_material ms1
+        on ms1.material_code = cm1.material_code_stuff and ms1.is_valid = '有效'
+        left join mes_order_bom ob1
+        on ob1.process_order_no = cm1.process_order_no and ob1.material_code_stuff = cm1.material_code_stuff and
+        ob1.is_valid = '有效'
+        left join wms_matnr_voucher_item voucher1
+        on voucher1.voucher_code = a.consume_document and voucher1.matnr = cm1.material_code_stuff and voucher1.factory
+        = b.factory_code
+        and voucher1.stock_place = cm1.warehouse_code_out and voucher1.batch_number = cm1.batch_stuff
+        left join mes_output_semi os
+        on os.batch = cm1.batch_stuff and os.is_valid = '有效' and os.status = '已确认'
+        join (SELECT
+        a.id,
+        a.slurry_code,
+        a.assess_type,
+        a.protein_whey,
+        a.protein_whole_fat,
+        a.protein_defat,
+        a.protein_total
+        FROM "mes_jckh_slurry_protein" a
+        where a.valid_begin &lt;= NOW()
+        and a.valid_end >= NOW()
+        and a.is_valid = '有效'
+        and NOT EXISTS (select id from mes_jckh_slurry_protein b
+        where
+        b.valid_begin &lt;= NOW()
+        and b.is_valid = '有效'
+        and b.valid_end >= NOW()
+        and a.slurry_code = b.slurry_code
+        and a.valid_begin &lt; b.valid_begin)) as protein
+        on protein.slurry_code = cm1.material_code_stuff and protein.assess_type = '2'
+        --二级展开表
+        left join mes_consume_material cm2
+        on cm2.process_order_no = os.process_order_no and ms1.material_made_type = 'BLJ' and cm2.is_valid = '有效'
+        left join mes_process_order order2
+        on order2.process_order_no = cm2.process_order_no and order2.is_valid = '有效'
+        left join mes_work_order work2
+        on order2.work_order_no = work2.work_order_no and work2.is_valid = '有效'
+        left join mdm_material ms2
+        on ms2.material_code = cm2.material_code_stuff and ms2.is_valid = '有效'
+        left join mes_order_bom ob2
+        on ob2.process_order_no = cm2.process_order_no and ob2.material_code_stuff = cm2.material_code_stuff and
+        ob2.is_valid = '有效'
+        left join mes_output_semi os2
+        on os2.batch = cm2.batch_stuff and os2.is_valid = '有效' and os2.status = '已确认'
+        join mes_jckh_protein_material proteinjckh
+        on proteinjckh.protein_material_code = cm2.material_code_stuff and proteinjckh.is_valid = '有效'
+        left join wms_batch_property wbp
+        on wbp.matnr = cm2.material_code_stuff and wbp.factory = work2.factory_code and wbp.batch_number =
+        cm2.batch_stuff
+        left join wms_batch_character wbc
+        on wbc.target_code = wbp.inner_number and wbc.character = 'Z_PROTEIN_CONTENT'
+
+        where a.is_valid = '有效'
+        and a.actual_output > 0
+        and a.status_consume = '已确认'
+        and b.factory_code = #{factoryCode}
+        and b.product_date = #{productDate}
+
+        GROUP BY
+        a.process_order_no,
+        a.material_code_product,
+        mp.base_unit,
+        b.factory_code,
+        b.product_date,
+        b.work_team_name,
+        b.work_class_name,
+        a.actual_output,
+        ps.product_specification,
+        cm2.process_order_no,
+        cm1.material_code_stuff,
+        ms1.base_unit
+    </select>
+
+
+</mapper>

@@ -1,0 +1,93 @@
+SELECT 
+distinct
+a.id,
+a.supplier_code,
+a.supplier_name,
+a.supplier_city_name,
+a.supplier_address,
+a.transport_zone_code,
+b.transport_zone_name,
+a.supplier_linkman,
+a.supplier_linkman,
+a.inner_customer_code,
+a.factory_code,
+c.factory_name,
+a.mercantile_partner,
+a.vat_registration_no,
+a.bank_code,
+a.bank_name,
+a.bank_account,
+a.bank_account_name,
+a.is_valid,
+case when a.is_valid = '有效' then '扩建'
+else '' end as view,
+a.supplier_type_code
+FROM mdm_supplier a
+left join mdm_transport_zone b
+on b.transport_zone_code = a.transport_zone_code and b.is_valid = '有效'
+left join mdm_factory c
+on c.factory_code = a.factory_code and c.is_valid = '有效'
+left join mdm_supplier_company d
+on a.supplier_code = d.supplier_code and d.is_valid = '有效'
+join mdm_user_company h
+on h.company_code = d.company_code and h.is_valid = '有效' and h.user_id = #userId#
+left join (select 
+		   distinct
+		   a.id,
+		   a.supplier_code,
+		   a.purchase_org_code
+		   from mdm_supplier_purchase_org a
+		   left join mdm_purchase_org c 
+		   on a.purchase_org_code = c.purchase_org_code and c.is_valid = '有效'
+		   left join mdm_factory_purchase_org g
+		   on g.purchase_org_code = a.purchase_org_code and g.is_valid = '有效'
+		   left join mdm_user_factory f
+		   on f.factory_code = g.factory_code and f.is_valid = '有效'
+		   where 
+		   f.user_id = #userId#
+		   and c.purchase_org_type = '003'
+		   and a.is_valid = '有效'
+		  <dynamic>
+			   <isNotNull property="supplier_code">
+				  and a.supplier_code like #supplier_code#
+			   </isNotNull>
+			</dynamic>
+
+		   UNION
+
+		   select 
+		   distinct
+		   a.id,
+		   a.supplier_code,
+		   a.purchase_org_code
+		   from mdm_supplier_purchase_org a
+		   left join mdm_purchase_org c 
+		   on a.purchase_org_code = c.purchase_org_code and c.is_valid = '有效'
+		   where 
+		   c.purchase_org_type in ('001','002') and 
+		   a.is_valid = '有效'
+		   <dynamic>
+			   <isNotNull property="supplier_code">
+				  and a.supplier_code like #supplier_code#
+			   </isNotNull>
+			</dynamic>) f
+on a.supplier_code = f.supplier_code
+where a.supplier_type_code in $listAccountGroup$
+<dynamic>
+ <isNotNull property="accountGroup">
+    and a.supplier_type_code = #accountGroup#
+ </isNotNull>
+ <isNotNull property="supplier_code">
+    and a.supplier_code like #supplier_code#
+ </isNotNull>
+ <isNotNull property="supplier_name">
+    and a.supplier_name like #supplier_name#
+ </isNotNull>
+ <isNotNull property="companyCode">
+    and d.company_code = #companyCode#
+ </isNotNull>
+ <isNotNull property="purchaseOrgCode">
+    and f.purchase_org_code = #purchaseOrgCode#
+ </isNotNull>
+</dynamic>
+order by a.supplier_code

@@ -1,0 +1,206 @@
+CREATE OR REPLACE FUNCTION "mes"."proc_prod_query_month_plan_lks"("ai_year" int4, "ai_month" int4, "as_plan_type" bpchar, "as_mtrl_type" bpchar, "as_place" varchar, "as_employee" varchar, "as_need_dy" bool)
+  RETURNS SETOF "pg_catalog"."record" AS $BODY$
+--***********************************************************************
+--ai_year  年
+--ai_month 月
+--as_plan_type 计划类型
+--as_mtrl_type  产品大类
+--as_place 产地
+--as_employee 计划员
+--as_need_dy  需求是否大于0
+--按照自己的理解写、之前的函数需求完全不一样
+--***********************************************************************
+declare rs record ; --结果集
+declare ai_count integer;
+
+begin
+
+
+--销售计划输出集
+create local TEMPORARY table temp_data 
+(
+area varchar(16) null,
+dept_no varchar(32) null,
+dept_name varchar(100) null,
+market varchar(32) null,
+colname varchar(32) null,
+stock int4 null,  --库存
+plan_qty int4 null, --计划量（下月计划产量）
+demand int4 null, --需求
+plan_order int4 null,
+order_qty int4 null,
+heji int4 null, --合计可供量
+yuque int4 null, --余缺量
+sale_plan int4 null --上报销售计划
+)ON COMMIT DROP;
+
+create local TEMPORARY table temp_result
+(
+area varchar(16) null,
+dept_no varchar(32) null,
+dept_name varchar(100) null,
+market varchar(32) null,
+colname varchar(32) null,
+stock int4 null,  --库存
+plan_qty int4 null, --计划量（下月计划产量）
+demand int4 null, --需求
+plan_order int4 null,
+order_qty int4 null,
+heji int4 null, --合计可供量
+yuque int4 null, --余缺量
+sale_plan int4 null --上报销售计划
+)ON COMMIT DROP;
+
+create local TEMPORARY table temp_plan
+(
+area varchar(16) null,
+dept_no varchar(32) null,
+dept_name varchar(100) null,
+colname varchar(32) null,
+stock int4 null,  --库存
+plan_qty int4 null, --计划量（下月计划产量）
+plan_order int4 null,
+order_qty int4 null,
+sale_plan int4 null --上报销售计划
+)ON COMMIT DROP;
+
+
+
+create local TEMPORARY table temp_demand_sum
+(
+area varchar(16) null,
+dept_no varchar(32) null,
+dept_name varchar(100) null,
+colname varchar(32) null,
+demand int4 null
+)ON COMMIT DROP;
+
+--检测一下一个片区是不是只对应一个计划员
+select count(1) into ai_count
+from (select item_code
+from mes_dictionary_item
+where classification = '计划员' and is_valid = '有效'
+group by item_code
+having count(item_value) > 1) as a;
+
+if ai_count > 0 then 
+	raise EXCEPTION '片区和计划员需要一对一';
+end if;
+
+--直接插入temp_data（根据前面的逻辑，现在去除sc_yw_product_market_plan表）		 
+insert into temp_data
+select 
+	xsp.pianqu,
+	a.production_place_code,
+	p.production_place_name,
+	null,
+	c.classification_name,
+	a.stock_quantity,
+	a.avalaible_quantity,
+	a.sale_quantity,
+	a.plan_quantity,
+	a.request_quantity,
+	null,
+	null,
+	a.sale_quantity
+from mes_month_avalaible a
+join mdm_classification c
+on c.classification_type = '055' and c.classification_code = a.classification_code and c.is_valid = '有效'
+join mdm_production_place p
+on p.production_place_code = a.production_place_code and p.is_valid = '有效'
+join xs_jc_place_pianqu xsp
+on xsp.place_code = a.production_place_code
+join (select distinct a.plan_manager,b.production_place_code
+from mes_plan_manager a
+join mdm_factory_production_place b
+on a.factory_code = b.factory_code and b.is_valid = '有效'
+where a.is_valid = '有效') as plan
+on plan.plan_manager like as_employee and a.production_place_code = plan.production_place_code
+where
+a.the_year = ai_year
+and a.the_month = ai_month
+and a.data_type = as_plan_type
+and a.production_place_code like as_place
+and c.classification_code_parent like as_mtrl_type
+and a.is_valid = '有效';				 
+
+
+
+--是否需求大于0
+if as_need_dy then
+   delete from temp_data where coalesce(demand,0) <= 0;
+end if;
+
+raise notice '########################1.0 %',CLOCK_TIMESTAMP();
+
+--库存=即时库存+到月底的生产计划-到月底的未发
+update temp_data
+set stock = coalesce(stock,0) + coalesce(plan_order,0) - coalesce(order_qty,0);
+
+--20110119 新加
+insert into temp_demand_sum
+select area,dept_no,dept_name,colname,sum(demand)
+from temp_data
+group by area,dept_no,dept_name,colname;
+
+--余缺量=库存+下月计划产量-需求,合计可供量=库存+下月计划产量
+update temp_data
+set heji = coalesce(stock,0) + coalesce(plan_order,0);
+
+update temp_data
+set yuque = coalesce(temp_data.stock,0) + coalesce(temp_data.plan_order,0) - coalesce(temp_demand_sum.demand,0)
+from temp_demand_sum
+where temp_demand_sum.area = temp_data.area and
+	temp_demand_sum.dept_name = temp_data.dept_name and
+	temp_demand_sum.dept_no = temp_data.dept_no and
+	temp_demand_sum.colname = temp_data.colname ;
+
+update temp_data
+set stock = null
+ where stock = 0;
+
+update temp_data
+	set plan_qty = null
+	 where plan_qty = 0;
+
+update temp_data
+	set heji = null
+ where heji = 0 ;
+
+update temp_data
+	set yuque = null
+ where yuque = 0 ;
+
+update temp_data
+	set demand = null
+ where demand = 0;
+
+ 
+ --排序
+ for rs in execute 'select area from temp_data GROUP BY area'
+ loop 
+		--raise notice '%', rs;
+		--单个片区的插入结果表
+	 INSERT into temp_result
+	 select *
+	 from temp_data where area  = REPLACE(REPLACE(rs::varchar, '(', ''), ')', '');
+		--计算各个片区的汇总
+	 insert into temp_result(area,dept_name,colname,demand)
+	 select area,'区域小计：',colname,sum(demand)
+	 from temp_data
+	 where area  = REPLACE(REPLACE(rs::varchar, '(', ''), ')', '')
+		GROUP BY area,colname;
+ end loop;
+ 
+
+for rs in execute 'select * from temp_result' 
+loop 
+  return next rs ;
+end loop ;
+
+
+end
+$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100
+  ROWS 1000

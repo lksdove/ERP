@@ -1,0 +1,53 @@
+select 
+a.pianqu,
+a.place_code,
+c.production_place_name,
+d.factory_code,
+factory.factory_name,
+cf1.classification_code as big_class_code,
+cf1.classification_name as big_class_name,
+cf2.classification_code as small_class_code,
+cf2.classification_name as small_class_name,
+e.material_code,
+f.material_name,
+SUM(stock.stock_unlimit) as stock_amount,
+SUM(xsso.plan_integer) as xsso_amount
+from xs_jc_place_pianqu a
+join mdm_factory_production_place b
+on a.place_code = b.production_place_code
+join mdm_production_place c
+on c.production_place_code = a.place_code
+join mdm_material_factory d
+on d.factory_code = b.factory_code and d.is_valid = '有效'
+join mdm_factory factory
+on factory.factory_code = d.factory_code and factory.is_valid = '有效'
+join mdm_dictionary_item item 
+on item.classification = '类类型' and item.item_value = '产品产能分类' and item.is_valid = '有效'
+join mdm_classification cf1
+on cf1.classification_type = item.item_code and cf1.classification_level = 1
+join mdm_material_classification e
+on e.material_code = d.material_code and e.is_valid = '有效' and e.classification_level = 1 and e.classification_code = cf1.classification_code 
+join mdm_classification cf2
+on cf2.classification_type = item.item_code and cf2.classification_level = 2
+join mdm_material_classification e2
+on e2.material_code = d.material_code and e2.is_valid = '有效' and e2.classification_level = 2 and e2.classification_code = cf2.classification_code 
+join mdm_material f
+on f.material_code  = e.material_code and f.material_code  = e2.material_code and f.material_type = 'FERT' and f.is_valid = '有效'
+left join wms_matnr_stock stock
+on stock.matnr = e.material_code and stock.factory = d.factory_code
+left join xs_yw_sale_order_info xsso
+on xsso.plan_status in ('确认','调度','打印出库单') and xsso.request_deliver_date < date_trunc('month',(to_date('2020-12-31','yyyy-MM-dd') + interval '1 month')) and xsso.request_deliver_date > CURRENT_DATE - INTERVAL '3 month' and xsso.facotry_code = d.factory_code and xsso.mtrl_no = e.material_code
+
+
+GROUP BY
+a.pianqu,
+a.place_code,
+c.production_place_name,
+d.factory_code,
+factory.factory_name,
+cf1.classification_code,
+cf1.classification_name,
+cf2.classification_code,
+cf2.classification_name,
+e.material_code,
+f.material_name

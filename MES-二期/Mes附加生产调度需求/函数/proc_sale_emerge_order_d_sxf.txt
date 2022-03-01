@@ -1,0 +1,169 @@
+CREATE OR REPLACE FUNCTION "public"."proc_sale_emerge_order_d_sxf"("ai_order" int4)
+  RETURNS SETOF "pg_catalog"."record" AS $BODY$
+
+declare rs record;
+begin
+   create temp table t_r
+   (
+	mtrl_no varchar(10),
+	materialname varchar(50),
+	plan_integer numeric(20,8),
+	ware_name varchar(50),
+	plan_status varchar(10),
+	about_deliver_date date,
+	market_deliver_day date,
+	deliver_note varchar(254),
+	order_no integer,
+	unit_no varchar(12),
+	order_itemno int2,
+	ware_no varchar(10),
+	place_code varchar(10),
+	stock_qty  integer,
+	prod_qty   integer,
+	ypwf_qty   integer,
+	plan_weight numeric(20,2),
+	goto_addr varchar(254)
+   )on commit drop;
+
+   create temp table t_temp_d
+   (
+	mtrl_no varchar(10),
+	place_code varchar(10),
+	stock_qty  integer,
+	prod_qty   integer,
+	ypwf_qty   integer
+   )on commit drop;
+
+   create temp table t_temp_t
+   (
+	mtrl_no varchar(10),
+	place_code varchar(10),
+	stock_qty  integer,
+	prod_qty   integer,
+	ypwf_qty   integer
+   )on commit drop;
+   insert into t_r(mtrl_no,materialname,plan_integer,ware_name,plan_status,about_deliver_date,
+    market_deliver_day,deliver_note,order_no,unit_no,order_itemno,ware_no,place_code,plan_weight,goto_addr)
+  SELECT xs_yw_sale_order_info.mtrl_no,   
+         jc_material.materialname,   
+         xs_yw_sale_order_info.plan_integer,   
+         jc_department.departmentname,   
+         xs_yw_sale_order_info.plan_status,   
+         xs_yw_sale_order_info.about_deliver_date,   
+         xs_yw_sale_order_info.market_deliver_day,   
+         xs_yw_sale_order_info.deliver_note,   
+         xs_yw_sale_order_info.order_no,   
+         xs_yw_sale_order_info.unit_no  ,
+         xs_yw_sale_order_info.order_itemno  ,
+         xs_yw_sale_order_info.ware_no  ,
+         jc_department.placecode,
+        round( (xs_yw_sale_order_info.plan_integer * jc_materialunitexchange.transweight/1000),2) as plan_weight,
+        xs_yw_sale_order_info.goto_addr
+    FROM xs_yw_sale_order_info,   
+         jc_department,   
+         jc_material  ,
+	 jc_units,
+         jc_materialunitexchange
+   WHERE ( jc_material.materialid = xs_yw_sale_order_info.mtrl_no ) and  
+         ( xs_yw_sale_order_info.ware_no = jc_department.departmentid ) and  
+         ( (xs_yw_sale_order_info.order_no = ai_order ) AND  
+         ( xs_yw_sale_order_info.mtrl_no = jc_materialunitexchange.materialid ) and  
+         ( xs_yw_sale_order_info.unit_no = jc_units.unit_gb ) and
+         ( jc_units.unit_no = jc_materialunitexchange.unit_no ) and
+         ( xs_yw_sale_order_info.plan_status not in ( '作废','结案','实发' ) ) )   ;
+
+    insert into t_temp_t(place_code,mtrl_no)
+    select distinct  t_r.place_code,
+           t_r.mtrl_no
+    from t_r ; 
+
+    insert into t_temp_d(place_code,mtrl_no,stock_qty)
+    select t_temp_t.place_code,
+           t_temp_t.mtrl_no,
+            round(sum(coalesce(xs_yw_ware_dept_stock.stock_qty,0) -coalesce(xs_yw_ware_dept_stock.speme,0) ),0)
+    from xs_yw_ware_dept_stock,t_temp_t,jc_department
+    where xs_yw_ware_dept_stock.ware_no = jc_department.departmentid and
+          jc_department.placecode = t_temp_t.place_code and
+          xs_yw_ware_dept_stock.mtrl_no = t_temp_t.mtrl_no 
+    group by t_temp_t.place_code,
+           t_temp_t.mtrl_no ;
+           
+    insert into t_temp_d(place_code,mtrl_no,prod_qty)
+    select t_temp_t.place_code,
+           t_temp_t.mtrl_no,
+            sum(xs_yw_day_plan_order.prdt_qty)
+    from xs_yw_day_plan_order,t_temp_t,jc_department
+    where xs_yw_day_plan_order.ware_dept_no = jc_department.departmentid and
+          jc_department.placecode = t_temp_t.place_code and
+          xs_yw_day_plan_order.p_mtrl_no = t_temp_t.mtrl_no and
+          xs_yw_day_plan_order.start_date >= current_date and
+          xs_yw_day_plan_order.start_date < current_date + interval '3 day' and
+          xs_yw_day_plan_order.status = '确认'
+    group by t_temp_t.place_code,
+           t_temp_t.mtrl_no ;
+
+    insert into t_temp_d(place_code,mtrl_no,ypwf_qty)
+    select t_temp_t.place_code,
+           t_temp_t.mtrl_no,
+           sum(xs_yw_sale_order_info.plan_integer)
+    from xs_yw_sale_order_info,t_temp_t,jc_department
+    where xs_yw_sale_order_info.ware_no = jc_department.departmentid and
+          jc_department.placecode = t_temp_t.place_code and
+          xs_yw_sale_order_info.mtrl_no = t_temp_t.mtrl_no and
+          xs_yw_sale_order_info.plan_status in ('调度','打印出库单') and
+          xs_yw_sale_order_info.assign_status in ('审核','确认') and
+          xs_yw_sale_order_info.about_deliver_date >= current_date - interval '3 month'
+    group by t_temp_t.place_code,
+           t_temp_t.mtrl_no ;
+    insert into t_temp_d(place_code,mtrl_no,ypwf_qty)
+    select t_temp_t.place_code,
+           t_temp_t.mtrl_no,
+           sum(xs_yw_yk_order_info.plan_integer)
+    from xs_yw_yk_order_info,t_temp_t,jc_department
+    where xs_yw_yk_order_info.ware_no = jc_department.departmentid and
+          jc_department.placecode = t_temp_t.place_code and
+          xs_yw_yk_order_info.mtrl_no = t_temp_t.mtrl_no and
+          xs_yw_yk_order_info.plan_status in ('调度','打印出库单') and
+          xs_yw_yk_order_info.assign_status in ('审核','确认') and
+          xs_yw_yk_order_info.about_deliver_date >= current_date - interval '3 month'
+    group by t_temp_t.place_code,
+           t_temp_t.mtrl_no ;
+      truncate table t_temp_t ; 
+      insert into t_temp_t(place_code,mtrl_no,ypwf_qty,prod_qty,stock_qty)
+      select place_code,
+	     mtrl_no,
+	     sum(ypwf_qty),
+	     sum(prod_qty),
+	     sum(stock_qty)
+     from t_temp_d
+     group by place_code,
+	     mtrl_no;
+    update t_r
+    set  ypwf_qty = t_temp_t.ypwf_qty,
+         prod_qty = t_temp_t.prod_qty,
+         stock_qty = t_temp_t.stock_qty
+    from t_temp_t
+    where  t_r.place_code = t_temp_t.place_code and
+           t_r.mtrl_no = t_temp_t.mtrl_no ;
+
+    update t_r
+    set  ypwf_qty = xs_yw_order_emerg_info.ypwf_qty,
+         prod_qty = xs_yw_order_emerg_info.prod_qty,
+         stock_qty = xs_yw_order_emerg_info.stock_qty
+    from xs_yw_order_emerg_info
+    where  t_r.order_no = xs_yw_order_emerg_info.order_no and
+           t_r.order_itemno = xs_yw_order_emerg_info.order_itemno ;
+    
+
+
+   for rs in select * from t_r
+   loop
+      return next rs;
+   end loop;
+
+ return;
+end
+$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100
+  ROWS 1000

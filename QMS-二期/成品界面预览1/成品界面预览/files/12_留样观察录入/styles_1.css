@@ -1,0 +1,39 @@
+﻿
+#u6967.mouseOver {
+}
+#u6967_text {
+  border-width:0px;
+  word-wrap:break-word;
+  text-transform:none;
+  visibility:hidden;
+}
+#u6968_img {
+  border-width:0px;
+  position:absolute;
+  left:0px;
+  top:0px;
+  width:6px;
+  height:11px;
+}
+#u6968 {
+  border-width:0px;
+  position:absolute;
+  left:9px;
+  top:14px;
+  width:6px;
+  height:11px;
+  display:flex;
+}
+#u6968 .text {
+  position:absolute;
+  align-self:center;
+  padding:2px 2px 2px 2px;
+  box-sizing:border-box;
+  width:100%;
+}
+#u6968_text {
+  border-width:0px;
+  word-wrap:break-word;
+  text-transform:none;
+  visibility:hidden;
+}

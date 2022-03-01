@@ -1,0 +1,288 @@
+CREATE OR REPLACE FUNCTION "public"."proc_sc_deliver_wphbb_slacker"("as_loc_no" varchar, "adt_ph_from" timestamp, "adt_ph_to" timestamp, "adt_dd_from" timestamp, "adt_dd_to" timestamp)
+  RETURNS SETOF "pg_catalog"."record" AS $BODY$
+declare rs record ;
+
+BEGIN
+
+-- binicool 指定发货旬 模式取消，代码恢复
+-- if as_loc_no = '2601' or as_loc_no = '0102' then
+-- 	return ;
+-- end if;
+
+
+create local TEMPORARY table temp_result (
+	order_no integer null,              --订单号
+	order_itemno integer null,          --订单项目号
+	outware_sheet_no varchar(20) null,  --交货单号
+	sheet_item_no integer null,         --交货单项目号
+	customer_no varchar(10) null,       --客户代码
+	customer_name varchar(200) null,    --客户名称
+	mtrl_no varchar(10) null,           --产品代码
+	materialname varchar(100) null,     --产品名称
+	plan_integer numeric(20,8) null,    --订单数量
+	about_deliver_date timestamp null,  --订单排货日期
+	market_deliver_day timestamp null,  --市场排货日期
+	ware_no varchar(10) null,           --仓库代码
+	ware_name varchar(100) null,        --仓库名称
+	plan_time timestamp null,   
+	unitweight numeric(20,8) null,   
+	plan_weight numeric(20,8) null,
+	trans_way varchar(10) null,         --运输方式
+	deliver_type varchar(20) null,      --发货类型
+	deliver_note varchar(200) null,     --排货备注
+	ship_to_addr varchar(150) null,     --送货地址
+	district_name varchar(50) null,    --地区
+	area_name varchar(40) null,        --市场
+	mtrl_type varchar(32) null,
+	parenttypename varchar(32) null,
+	case_price numeric(20,8) null,      --价格
+	unit_no varchar(32) null,
+	connector varchar(32) null,   
+	phone varchar(50) null,
+	postcode varchar(12) null,
+	communite_addr varchar(200) null,
+	pin_no varchar(200) null,
+	trans_note varchar(200) null,
+	sale_customer_name varchar(200) null,
+	station_no varchar(12) null,
+	bill_type varchar(12) null,
+	lun_month  int null,
+	lun_sort   int null,
+	affirm_time timestamp without time zone, -- 确认时间
+	request_deliver_date date ,-- 请求发货日期
+	obj_properties  varchar(30) null,
+	request_deliver_xun varchar(12) null,--指定发货时间段
+	p_year integer null,
+	p_month integer null,
+	p_xun  varchar(10) null
+) on commit drop;
+
+
+insert into temp_result
+  SELECT distinct xs_yw_sale_order_info.order_no,   
+         xs_yw_sale_order_info.order_itemno,   
+         xs_yw_sale_order_info.outware_sheet_no,   
+         xs_yw_sale_order_info.sheet_item_no,   
+         xs_yw_sale_order_info.customer_no,   
+         xs_yw_sale_order_info.customer_name,
+         xs_yw_sale_order_info.mtrl_no,   
+         jc_material.materialname,   
+         xs_yw_sale_order_info.plan_integer,   
+         xs_yw_sale_order_info.about_deliver_date,   
+         xs_yw_sale_order_info.market_deliver_day,   
+         xs_yw_sale_order_info.ware_no,   
+         innerentity_b.entityname,   
+         xs_yw_sale_order_info.plan_time,   
+         jc_materialunitexchange.unitweight,   
+         (xs_yw_sale_order_info.plan_integer * jc_materialunitexchange.unitweight/1000) as plan_weight,
+         xs_yw_sale_order_info.trans_way,
+         xs_yw_sale_order_info.deliver_type,
+         xs_yw_sale_order_info.deliver_note,
+         coalesce(jc_customer_tostation.goto_addr,''),
+         district.departmentname,   
+         xs_yw_sale_order_info.market,
+         '',   
+         '',
+         xs_yw_sale_order_info.case_price,
+         xs_yw_sale_order_info.unit_no,
+         sale_cus_a.connector,   
+         sale_cus_a.phone,
+         sale_cus_a.postcode,
+         sale_cus_a.communite_addr as communite_addr,
+         xs_yw_sale_order_info.pin_no,
+         sale_cus_b.trans_note,
+         innerentity_c.entityname,
+         jc_customer_tostation.station_no,
+         '销售',
+         xs_yw_sale_order_info.lun_month,
+         xs_yw_sale_order_info.lun_sort,
+         xs_yw_sale_order_info.affirm_time,
+         xs_yw_sale_order_info.request_deliver_date,
+         jc_customer_tostation.obj_properties,
+         xs_yw_sale_order_info.p_month||'月'||xs_yw_sale_order_info.p_xun,
+         xs_yw_sale_order_info.p_year,
+         xs_yw_sale_order_info.p_month,
+         xs_yw_sale_order_info.p_xun
+    FROM xs_yw_sale_order_info,   
+         jc_innerentity innerentity_b,
+         xs_yw_dept_2_deliver,  
+         jc_customer_tostation,
+         jc_materialunitexchange,         
+         jc_department district,   
+         jc_sale_customer sale_cus_a,
+         jc_material,
+         jc_sale_customer sale_cus_b,   
+         jc_innerentity innerentity_c
+   WHERE ( xs_yw_sale_order_info.customer_no = sale_cus_a.customer_no ) and  
+         ( sale_cus_a.district_no = district.departmentid ) and
+          ( jc_customer_tostation.use_dept = 'bm3318' ) and
+          ( jc_customer_tostation.series_no = xs_yw_sale_order_info.series_no) and
+         ( jc_material.materialid = xs_yw_sale_order_info.mtrl_no ) and  
+         ( innerentity_b.entityid = xs_yw_sale_order_info.ware_no ) and  
+          ( jc_customer_tostation.sal_customer_no = sale_cus_b.customer_no ) and  
+          ( sale_cus_b.customer_no = innerentity_c.entityid ) and
+         ( xs_yw_sale_order_info.ware_no = xs_yw_dept_2_deliver.departmentid ) and  
+         ( xs_yw_sale_order_info.mtrl_no = jc_materialunitexchange.materialid ) and  
+         ( xs_yw_sale_order_info.unit_no =  jc_materialunitexchange.unit_gb ) and           
+         ( xs_yw_sale_order_info.dispatch_time >= adt_dd_from ) and
+         ( xs_yw_sale_order_info.dispatch_time < (adt_dd_to + interval '1 day') ) and
+         ( xs_yw_dept_2_deliver.loc_no like as_loc_no ) and
+         ( xs_yw_sale_order_info.plan_status = '调度' ) and
+         ( xs_yw_sale_order_info.assign_status = '初始') and
+         ( xs_yw_sale_order_info.sap_mark = '1' ) and
+         ( xs_yw_sale_order_info.about_deliver_date < (adt_ph_to + interval '1 day') ) and
+         ( xs_yw_sale_order_info.about_deliver_date >= adt_ph_from ) and
+         ( xs_yw_sale_order_info.plan_integer > 0 );
+
+insert into temp_result
+  SELECT distinct xs_yw_yk_order_info.order_no,   
+         xs_yw_yk_order_info.order_itemno,   
+         xs_yw_yk_order_info.outware_sheet_no,
+         xs_yw_yk_order_info.item_no,  
+         xs_yw_yk_order_info.in_ware, 
+         innerentity_a.entityname,   
+         xs_yw_yk_order_info.mtrl_no,   
+         jc_material.materialname,   
+         xs_yw_yk_order_info.plan_integer,   
+         xs_yw_yk_order_info.about_deliver_date,   
+         xs_yw_yk_order_info.about_deliver_date,   
+         xs_yw_yk_order_info.ware_no,   
+         innerentity_b.entityname,   
+         xs_yw_yk_order_info.plan_time,   
+         jc_materialunitexchange.unitweight,   
+         (xs_yw_yk_order_info.plan_integer * jc_materialunitexchange.unitweight/1000) as plan_weight,
+         xs_yw_yk_order_info.trans_way, '', xs_yw_yk_order_info.deliver_note, 
+         coalesce(xs_yw_yk_order_info.org_addr,''), '', xs_yw_yk_order_info.market,   
+         '' as a_typename,   
+         '' as b_typename,
+         0, xs_yw_yk_order_info.unit_no,
+         xs_yw_yk_order_info.connector,   
+         xs_yw_yk_order_info.phone,
+         '' as org_postcode,
+         xs_yw_yk_order_info.org_addr,
+         '', jc_sale_customer.trans_note,
+         jc_customer_tostation.sal_customer_no,
+         jc_customer_tostation.station_no,
+         '移库',0,0,         
+         xs_yw_yk_order_info.affirm_time,
+         xs_yw_yk_order_info.request_deliver_date,
+         jc_customer_tostation.obj_properties,
+         '',0,0,''
+    FROM jc_innerentity innerentity_a,     
+         xs_yw_yk_order_info,   
+         jc_innerentity innerentity_b,   
+         xs_yw_dept_2_deliver,   
+         jc_materialunitexchange,
+         jc_customer_tostation,
+         jc_material,
+         jc_sale_customer
+   WHERE ( jc_material.materialid = xs_yw_yk_order_info.mtrl_no ) and  
+         ( innerentity_a.entityid = xs_yw_yk_order_info.in_ware ) and  
+         ( innerentity_b.entityid = xs_yw_yk_order_info.ware_no ) and  
+         ( xs_yw_yk_order_info.ware_no = xs_yw_dept_2_deliver.departmentid ) and  
+         ( jc_customer_tostation.use_dept = 'bm3318' ) and
+         ( jc_customer_tostation.series_no = xs_yw_yk_order_info.series_no ) and
+         ( jc_customer_tostation.sal_customer_no = jc_sale_customer.customer_no ) and 
+         ( xs_yw_yk_order_info.mtrl_no = jc_materialunitexchange.materialid ) and 
+         ( xs_yw_yk_order_info.unit_no = jc_materialunitexchange.unit_gb ) and        
+         ( xs_yw_yk_order_info.about_deliver_date < (adt_ph_to + interval '1 day') ) and  
+         ( xs_yw_yk_order_info.about_deliver_date >= (adt_ph_from + interval '1 day') ) and
+         ( xs_yw_dept_2_deliver.loc_no like as_loc_no ) and
+         ( xs_yw_yk_order_info.plan_status = '调度' ) and
+         ( xs_yw_yk_order_info.assign_status = '初始' ) and
+         ( xs_yw_yk_order_info.sap_mark = '1' ) and
+         ( xs_yw_yk_order_info.plan_integer > 0 );
+
+      update temp_result
+      set ship_to_addr = temp_result.ship_to_addr || '**' || jc_sale_station.station_name
+      from jc_sale_station
+      where jc_sale_station.station_no = temp_result.station_no and
+            temp_result.bill_type = '销售' and
+            temp_result.trans_way = '铁路';
+
+      update temp_result
+      set deliver_note = jc_sale_station.station_name || '**'
+      from jc_sale_station
+      where jc_sale_station.station_no = temp_result.station_no and
+            temp_result.bill_type = '移库' and
+            temp_result.trans_way = '铁路';
+
+      update temp_result
+      set deliver_note = deliver_note || jc_sale_customer.customer_name || '**' || jc_sale_customer.fax_no,
+          sale_customer_name = ''
+      from jc_sale_customer 
+      where jc_sale_customer.customer_no = temp_result.sale_customer_name and
+            temp_result.bill_type = '移库' and
+            temp_result.trans_way = '铁路';
+
+      update temp_result
+      set mtrl_type = xs_jc_materialascription.typename
+      from xs_jc_materialascription
+      where ( temp_result.mtrl_no = xs_jc_materialascription.materialid ) and
+            ( xs_jc_materialascription.classname = '产品产能分类' ) AND  
+            ( xs_jc_materialascription.rank = 1 );
+
+      update temp_result
+      set parenttypename = xs_jc_materialascription.typename
+      from xs_jc_materialascription
+      where ( temp_result.mtrl_no = xs_jc_materialascription.materialid ) and
+            ( xs_jc_materialascription.classname = '产品产能分类' ) AND  
+            ( xs_jc_materialascription.rank = 2 );
+
+
+update temp_result set request_deliver_xun = request_deliver_xun||xs_jc_order_xun_date.note
+from xs_jc_order_xun_date
+where temp_result.p_year = xs_jc_order_xun_date.p_year and
+      temp_result.p_month = xs_jc_order_xun_date.p_month and
+      temp_result.p_xun = xs_jc_order_xun_date.functionname and
+      xs_jc_order_xun_date.functionmodule = '报站自然旬';
+      
+      for  rs in execute 'select order_no,
+			order_itemno,
+			outware_sheet_no,
+			sheet_item_no,
+			customer_no,
+			customer_name,
+			mtrl_no,
+			materialname,
+			plan_integer,
+			about_deliver_date,
+			market_deliver_day,
+			ware_no,
+			ware_name,
+			plan_time,
+			unitweight,
+			plan_weight,
+			trans_way,
+			deliver_type,
+			deliver_note,
+			ship_to_addr,
+			district_name,
+			area_name,
+			mtrl_type,
+			parenttypename,
+			case_price,
+			unit_no,
+			connector,
+			phone,
+			postcode,
+			communite_addr,
+			pin_no,
+			trans_note,
+			sale_customer_name,lun_month,lun_sort,
+			affirm_time,request_deliver_date,obj_properties,request_deliver_xun
+			from temp_result'
+      loop 
+         return next rs ;
+      end loop ;
+
+--插入到函数执行记录表中
+insert into jc_proc_task
+  (begin_time,end_time,proc_name,func_name,oper_man,para_value,note)
+  values (CURRENT_TIMESTAMP , timeofday() :: TIMESTAMP , current_query(), '','','','');
+
+END;
+$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100
+  ROWS 1000

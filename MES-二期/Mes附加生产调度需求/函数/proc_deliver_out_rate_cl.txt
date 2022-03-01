@@ -1,0 +1,212 @@
+CREATE OR REPLACE FUNCTION "public"."proc_deliver_out_rate_cl"("ad_date" timestamp, "as_placecode" varchar, "ad_date_start" timestamp, "ad_date_end" timestamp)
+  RETURNS SETOF "pg_catalog"."record" AS $BODY$
+
+declare rs record;
+
+declare as_date varchar(10);
+declare as_year_month varchar(8);
+declare as_today varchar(2);
+declare as_date_new varchar(10);
+declare adt_end_date timestamp;
+declare adt_start_date timestamp;
+declare adt_date_new timestamp;
+
+begin
+
+as_date = ad_date :: varchar(10);
+as_year_month = substring(as_date,1,8);
+as_today = substring(as_date,9,2);
+as_date_new = as_year_month || '01';
+adt_date_new = as_date_new :: timestamp;
+--ad_date_end = ad_date_end + interval '1 day';
+
+if as_today >= '21' then
+  adt_start_date = (as_year_month || '21') :: timestamp;
+  adt_end_date = adt_date_new + interval '1 month';
+end if;
+
+if as_today >= '11' and as_today < '21' then
+  adt_start_date = (as_year_month || '11') :: timestamp;
+  adt_end_date = (as_year_month || '21') :: timestamp;
+end if;
+
+if as_today < '11' then
+  adt_start_date = (as_year_month || '01') :: timestamp;
+  adt_end_date = (as_year_month || '11') :: timestamp;
+end if;
+
+--检查临时表是否存在
+--建临时表
+PERFORM schemaname FROM pg_stat_user_tables where relname ='t_deliver_out_rate_result';
+IF NOT FOUND THEN
+   create local TEMPORARY table t_deliver_out_rate_result(
+                                                          dept_no varchar(10),
+                                                          dept_name varchar(200) null,
+                                                          market_name varchar(200),
+                                                          district_no varchar(10),
+                                                          district_name varchar(200) null,
+                                                          mtrl_class varchar(32) null,
+                                                          deliver_num numeric(20,8) null,
+                                                          not_deliver_num numeric(20,8) null,
+                                                          rate numeric(20,8) null
+                                                          )ON COMMIT DROP; 
+END IF;
+
+--检查临时表是否存在
+--建临时表
+PERFORM schemaname FROM pg_stat_user_tables where relname ='t_deliver_out_rate_1';
+IF NOT FOUND THEN
+   create local TEMPORARY table t_deliver_out_rate_1(
+                                                     customer_no varchar(10) null,
+                                                     mtrl_class varchar(32) null,
+                                                     ware_no varchar(10) null,
+                                                     dept_no varchar(10) null,
+                                                     market_name varchar(200) null,
+                                                     district_no varchar(10) null,
+                                                     deliver_num numeric(20,8) null,
+                                                     not_deliver_num numeric(20,8) null
+                                                     )ON COMMIT DROP; 
+END IF;
+
+--检查临时表是否存在
+--建临时表
+PERFORM schemaname FROM pg_stat_user_tables where relname ='t_deliver_out_rate_ware';
+IF NOT FOUND THEN
+   create local TEMPORARY table t_deliver_out_rate_ware(
+                                                        ware_no varchar(10),
+                                                        dept_no varchar(10),
+                                                        dept_name varchar(200),
+                                                        dept_type varchar(12)  --仓库类型
+                                                        )ON COMMIT DROP; 
+END IF;
+
+insert into t_deliver_out_rate_ware
+select xs_yw_dept_2_deliver.departmentid,   
+       xs_yw_dept_2_deliver.dept_no,   
+       xs_yw_dept_2_deliver.entityname,
+       xs_yw_dept_2_deliver.dept_type
+  from xs_yw_dept_2_deliver 
+ where xs_yw_dept_2_deliver.loc_no like as_placecode;
+
+insert into t_deliver_out_rate_1
+select distinct xs_yw_sale_order_info.customer_no,
+       xs_jc_materialascription.typename,
+       xs_yw_sale_order_info.ware_no,
+       null,
+       null,
+       null,
+       sum(coalesce(xs_yw_sale_order_info.plan_integer,0)),
+       0
+  from xs_yw_sale_order_info,
+       t_deliver_out_rate_ware,
+       xs_jc_materialascription
+ where (( xs_yw_sale_order_info.plan_status = '实发' ) or
+        ( xs_yw_sale_order_info.plan_status = '结案' )) and
+       ( xs_yw_sale_order_info.deliver_date >= ad_date_start ) and
+       ( xs_yw_sale_order_info.deliver_date < (ad_date_end + interval '1 day') ) and
+       ( xs_yw_sale_order_info.ware_no = t_deliver_out_rate_ware.ware_no ) and
+       ( xs_yw_sale_order_info.mtrl_no = xs_jc_materialascription.materialid ) and
+       ( xs_jc_materialascription.classname = '产品产能分类' ) and
+       ( xs_jc_materialascription.rank = 2 )
+ group by xs_yw_sale_order_info.customer_no,
+          xs_jc_materialascription.typename,
+          xs_yw_sale_order_info.ware_no;
+
+insert into t_deliver_out_rate_1
+select distinct xs_yw_sale_order_info.customer_no,
+       xs_jc_materialascription.typename,
+       xs_yw_sale_order_info.ware_no,
+       null,
+       null,
+       null,
+       0,
+       sum(coalesce(xs_yw_sale_order_info.plan_integer,0))
+  from xs_yw_sale_order_info,
+       t_deliver_out_rate_ware,
+       xs_jc_materialascription
+ where ( xs_yw_sale_order_info.plan_status = '打印出库单' ) and
+       ( xs_yw_sale_order_info.about_deliver_date < ad_date ) and
+       --索引用
+       ( xs_yw_sale_order_info.about_deliver_date >= (current_date - 100) ) and
+       ( xs_yw_sale_order_info.ware_no = t_deliver_out_rate_ware.ware_no ) and
+       ( xs_yw_sale_order_info.mtrl_no = xs_jc_materialascription.materialid ) and
+       ( xs_jc_materialascription.classname = '产品产能分类' ) and
+       ( xs_jc_materialascription.rank = 2 )
+ group by xs_yw_sale_order_info.customer_no,
+          xs_jc_materialascription.typename,
+          xs_yw_sale_order_info.ware_no;
+
+update t_deliver_out_rate_1
+   set district_no = jc_sale_customer.district_no,
+       market_name = market.departmentname
+  from jc_sale_customer,
+       jc_rankdiagram,
+       jc_department market
+ where t_deliver_out_rate_1.customer_no = jc_sale_customer.customer_no
+   and jc_sale_customer.district_no = jc_rankdiagram.departmentid
+   and market.departmentid = jc_rankdiagram.parentid
+   and jc_rankdiagram.ranktype = '销售组织'
+   and jc_rankdiagram.rankid = 30;
+
+update t_deliver_out_rate_1
+   set dept_no = t_deliver_out_rate_ware.dept_no
+  from t_deliver_out_rate_ware
+ where t_deliver_out_rate_1.ware_no = t_deliver_out_rate_ware.ware_no;
+
+delete from t_deliver_out_rate_1 where market_name = null or district_no = null or dept_no = null or mtrl_class = null;
+
+insert into t_deliver_out_rate_result
+select distinct dept_no,
+       null,
+       market_name,
+       district_no,
+       null,
+       mtrl_class,
+       sum(deliver_num),
+       sum(not_deliver_num),
+       0
+  from t_deliver_out_rate_1
+ group by dept_no,
+          market_name,
+          district_no,
+          mtrl_class;
+
+update t_deliver_out_rate_result
+   set dept_name = t_deliver_out_rate_ware.dept_name
+  from t_deliver_out_rate_ware
+ where t_deliver_out_rate_result.dept_no = t_deliver_out_rate_ware.dept_no;
+
+update t_deliver_out_rate_result
+   set district_name = district.departmentname
+  from jc_rankdiagram,
+       jc_department district
+ where t_deliver_out_rate_result.district_no = jc_rankdiagram.departmentid
+   and district.departmentid = jc_rankdiagram.departmentid
+   and jc_rankdiagram.ranktype = '销售组织'
+   and jc_rankdiagram.rankid = 30;
+
+update t_deliver_out_rate_result
+   set rate = round(deliver_num / (deliver_num + not_deliver_num),2);
+
+update t_deliver_out_rate_result
+   set dept_name = '中转仓库'
+  from t_deliver_out_rate_ware
+ where t_deliver_out_rate_result.dept_no = t_deliver_out_rate_ware.dept_no
+   and t_deliver_out_rate_ware.dept_type like '%中转%';
+
+for rs in execute 'select t_deliver_out_rate_result.dept_name,
+       t_deliver_out_rate_result.market_name,
+       t_deliver_out_rate_result.district_name,
+       t_deliver_out_rate_result.mtrl_class,
+       t_deliver_out_rate_result.deliver_num,
+       t_deliver_out_rate_result.not_deliver_num,
+       t_deliver_out_rate_result.rate 
+  from t_deliver_out_rate_result'
+    loop 
+	return next rs ;
+    end loop;
+
+end$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100
+  ROWS 1000
